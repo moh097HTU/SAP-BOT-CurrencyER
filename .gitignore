@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+env/
+.chromedriver/
+chrome_profile/
+.DS_Store
+*.log
+*.png
