@@ -9,6 +9,12 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from services.config import config
 
+def fluent_wait(driver: WebDriver, timeout: float, poll: float = 0.25, ignored_exceptions: tuple = ()):
+    """
+    Thin helper for Selenium's fluent wait (custom poll interval + ignored exceptions).
+    """
+    return WebDriverWait(driver, timeout, poll_frequency=poll, ignored_exceptions=ignored_exceptions)
+
 def _all_frames(driver: WebDriver):
     try:
         return driver.find_elements(By.CSS_SELECTOR, "iframe, frame")

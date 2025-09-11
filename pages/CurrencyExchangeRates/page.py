@@ -1,47 +1,29 @@
 from urllib.parse import urlparse
 from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
 import os
 import time
+from typing import Optional
+from contextlib import nullcontext
 
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.common.exceptions import (
-    StaleElementReferenceException,
-    ElementClickInterceptedException,
-    TimeoutException,
-)
+from selenium.common.exceptions import TimeoutException
 
 from core.base import Page, Element
 from services.ui import wait_ui5_idle
-from .selectors import (
-    APP_HASH,
-    CREATE_BUTTON_XPATH,
-    EXCH_TYPE_INPUT_XPATH,
-    FROM_CCY_INPUT_XPATH,
-    TO_CCY_INPUT_XPATH,
-    VALID_FROM_INPUT_XPATH,
-    QUOTATION_INNER_INPUT_XPATH,
-    QUOTATION_ARROW_BTN_XPATH,
-    QUOTATION_OPTION_BY_TEXT_XPATH,
-    EXCH_RATE_INPUT_XPATH,
-    EXCH_RATE_INPUT_FALLBACK_XPATH,
-    FROM_FACTOR_BY_LABEL_XPATH,
-    TO_FACTOR_BY_LABEL_XPATH,
-    FORM_CREATE_OR_SAVE_BTN_XPATH,
-    ACTIVATE_CREATE_BTN_XPATH,
-    MESSAGE_TOAST_CSS,
-    ANY_INVALID_INPUT_XPATH,
-    ANY_ERROR_WRAPPER_XPATH,
-    DIALOG_ROOT_CSS,
-    # NEW
-    OBJECT_HEADER_CONTENT_XPATH,
-    OBJECT_HEADER_RATE_VALUE_XPATH,
-    CLOSE_COLUMN_BTN_XPATH,
-)
+from .selectors import APP_HASH
+
+# Elements
+from .elements.ListToolbar.element import ListToolbar
+from .elements.Dialog.element import DialogWatcher
+from .elements.Fields.element import Fields
+from .elements.Factors.element import Factors
+from .elements.Quotation.element import QuotationField
+from .elements.Rate.element import ExchangeRateField
+from .elements.Footer.element import FooterActions
+from .elements.Toast.element import ToastReader
+from .elements.Validation.element import ValidationInspector
+from .elements.SideColumn.element import SideColumnController
+from .elements.Header.element import ObjectHeaderVerifier
+
 
 class CurrencyExchangeRatesPage(Page):
     def _el(self) -> Element:
@@ -91,349 +73,76 @@ class CurrencyExchangeRatesPage(Page):
             time.sleep(0.12)
         return False
 
-    # -------- Dialog detection (read only; never close) --------
-    def _dialog_open(self) -> bool:
-        try:
-            return bool(self.driver.execute_script(
-                "var a=document.querySelectorAll(arguments[0]);"
-                "for(var i=a.length-1;i>=0;i--){var el=a[i];"
-                "var s=window.getComputedStyle(el);"
-                "if(s && s.display!=='none' && s.visibility!=='hidden' && el.offsetWidth>0 && el.offsetHeight>0){return true;}}"
-                "return false;", DIALOG_ROOT_CSS
-            ))
-        except Exception:
-            return False
+    # -------- App navigation (hardened) --------
+    def ensure_in_app(self, max_attempts: int = 2, settle_each: int = 8):
+        """
+        Guarantee we are on the list report of Currency Exchange Rates app:
+          - Deep-link to APP_HASH
+          - Wait for UI to settle
+          - Force FCL OneColumn if needed
+          - Confirm list 'Create' is clickable
+        """
+        attempts = max(1, max_attempts)
+        listbar = ListToolbar(self.driver)
+        sidecol = SideColumnController(self.driver)
 
-    def _capture_dialog_text(self) -> str:
-        try:
-            txt = self.driver.execute_script(
-                "var a=document.querySelectorAll(arguments[0]);"
-                "for(var i=a.length-1;i>=0;i--){var el=a[i];"
-                "var s=window.getComputedStyle(el);"
-                "if(s && s.display!=='none' && s.visibility!=='hidden' && el.offsetWidth>0 && el.offsetHeight>0){"
-                "  return (el.innerText||el.textContent||'').trim();}}"
-                "return '';", DIALOG_ROOT_CSS
-            )
-            return (txt or "").strip()
-        except Exception:
-            return ""
+        for _ in range(attempts):
+            cur = (self.driver.current_url or "")
+            if APP_HASH.lower() not in cur.lower():
+                self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
 
-    # -------- App navigation --------
-    def ensure_in_app(self):
-        try:
-            cur = self.driver.current_url or ""
-        except Exception:
-            cur = ""
-        if APP_HASH.lower() not in cur.lower():
-            self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
-            wait_ui5_idle(self.driver, timeout=Element(self.driver)._timeout)
-        el = self._el()
-        WebDriverWait(self.driver, max(el._timeout, 20)).until(
-            EC.element_to_be_clickable((By.XPATH, CREATE_BUTTON_XPATH))
-        )
+            wait_ui5_idle(self.driver, timeout=max(self._el()._timeout, settle_each))
+            self._wait_not_busy(max(self._el()._timeout, settle_each))
+
+            sidecol.close_if_present(timeout=min(10, max(8, self._el()._timeout)))
+
+            try:
+                listbar.wait_create_clickable(timeout=max(60, self._el()._timeout))
+                return
+            except TimeoutException:
+                self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
+                time.sleep(0.5)
+
+        snap = self._screenshot("ensure_in_app_timeout")
+        raise TimeoutException(f"ensure_in_app failed after {attempts} attempts. Screenshot: {snap}")
 
     def back_to_list(self):
+        listbar = ListToolbar(self.driver)
         self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
-        el = self._el()
-        wait_ui5_idle(self.driver, timeout=max(el._timeout, 20))
-        WebDriverWait(self.driver, max(el._timeout, 20)).until(
-            EC.element_to_be_clickable((By.XPATH, CREATE_BUTTON_XPATH))
-        )
+        wait_ui5_idle(self.driver, timeout=max(self._el()._timeout, 20))
+        listbar.wait_create_clickable(timeout=max(60, self._el()._timeout))
 
-    # LIST → click Create
+    # -------- Internal helpers --------
     def _click_list_create(self, timeout: int | None = None):
-        el = self._el()
-        btn = el.wait_clickable(By.XPATH, CREATE_BUTTON_XPATH)
-        try:
-            btn.click()
-        except Exception:
-            el.js_click(btn)
-        wait_ui5_idle(self.driver, timeout=timeout or el._timeout)
-        self._wait_not_busy(timeout or el._timeout)
+        listbar = ListToolbar(self.driver)
+        listbar.click_create(timeout or self._el()._timeout)
+        wait_ui5_idle(self.driver, timeout=timeout or self._el()._timeout)
+        self._wait_not_busy(timeout or self._el()._timeout)
 
-    # -------- Helpers: robust field set --------
-    def _hard_clear(self, web_el):
-        for fn in (
-            lambda: web_el.clear(),
-            lambda: web_el.send_keys(Keys.CONTROL, "a"),
-            lambda: web_el.send_keys(Keys.DELETE),
-            lambda: self.driver.execute_script(
-                "arguments[0].value='';"
-                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
-                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", web_el),
-        ):
-            try: fn()
-            except Exception: pass
+    def _read_last_toast_text(self) -> str:
+        return ToastReader(self.driver).read_last()
 
-    def _set_plain_input(self, xpath: str, value: str, press_enter: bool = False):
-        el = self._el()
-        inp = el.wait_visible(By.XPATH, xpath)
-        self._hard_clear(inp)
-        if value is not None:
-            inp.send_keys(value)
-        if press_enter:
-            try: inp.send_keys(Keys.ENTER)
-            except Exception: pass
-        try: inp.send_keys(Keys.TAB)
-        except Exception: pass
-
-    def _try_set_factor_by_label(self, label_xpath: str, value: str = "1"):
-        try:
-            inp = self.driver.find_element(By.XPATH, label_xpath)
-        except Exception:
-            return False
-        try:
-            self._hard_clear(inp)
-            inp.send_keys(value)
-            try: inp.send_keys(Keys.TAB)
-            except Exception: pass
-            wait_ui5_idle(self.driver, timeout=self._el()._timeout)
-            return True
-        except Exception:
-            return False
-
-    # -------- Quotation --------
-    def _set_quotation_value(self, value: str):
-        el = self._el()
-        wait = WebDriverWait(self.driver, max(el._timeout, 20))
-        inp = el.wait_visible(By.XPATH, QUOTATION_INNER_INPUT_XPATH)
-        try:
-            inp.click()
-        except Exception:
-            el.js_click(inp)
-
-        self._hard_clear(inp)
-
-        inp.send_keys(value)
-        inp.send_keys(Keys.ENTER)
-        inp.send_keys(Keys.TAB)
-        wait_ui5_idle(self.driver, timeout=el._timeout)
-
-        cur = (inp.get_attribute("value") or "").strip()
-        if cur.lower() != value.strip().lower():
-            try:
-                arrow = wait.until(EC.element_to_be_clickable((By.XPATH, QUOTATION_ARROW_BTN_XPATH)))
-                try: arrow.click()
-                except Exception: el.js_click(arrow)
-            except Exception:
-                try: inp.send_keys(Keys.ALT, Keys.DOWN)
-                except Exception: pass
-            wait_ui5_idle(self.driver, timeout=el._timeout)
-            opt_xpath = QUOTATION_OPTION_BY_TEXT_XPATH.format(TEXT=value.strip())
-            option = wait.until(EC.element_to_be_clickable((By.XPATH, opt_xpath)))
-            try: option.click()
-            except Exception: el.js_click(option)
-            wait_ui5_idle(self.driver, timeout=el._timeout)
-
-    # -------- Locale handling for rate typing --------
-    def _ui_lang_tag(self) -> str:
-        try:
-            return self.driver.execute_script(
-                """
-                try{
-                  var c=sap && sap.ui && sap.ui.getCore && sap.ui.getCore().getConfiguration && sap.ui.getCore().getConfiguration();
-                  if(!c) return (navigator.language || 'en-US');
-                  if (c.getLanguageTag) return c.getLanguageTag();
-                  if (c.getLanguage)    return c.getLanguage();
-                  return (navigator.language || 'en-US');
-                }catch(e){ return (navigator.language || 'en-US'); }
-                """
-            ) or "en-US"
-        except Exception:
-            return "en-US"
-
-    def _format_rate_locale(self, num: Decimal) -> str:
-        q = num.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
-        lang = self._ui_lang_tag()
-        try:
-            from babel.numbers import format_decimal
-            return format_decimal(q, format="0.00000", locale=(lang or "en-US").replace("-", "_"))
-        except Exception:
-            try:
-                return self.driver.execute_script(
-                    """
-                    try{
-                      var val = Number(arguments[0]);
-                      var lang = arguments[1] || (navigator.language || 'en-US');
-                      if (!isFinite(val)) return '';
-                      return new Intl.NumberFormat(lang,
-                               {minimumFractionDigits:5, maximumFractionDigits:5, useGrouping:false}
-                              ).format(val);
-                    }catch(e){ return String(arguments[0]); }
-                    """,
-                    float(q), lang
-                )
-            except Exception:
-                return f"{q:.5f}"
-
-    def _find_rate_input(self):
-        el = self._el()
-        try:
-            return el.wait_visible(By.XPATH, EXCH_RATE_INPUT_XPATH)
-        except Exception:
-            pass
-        try:
-            return el.wait_visible(By.XPATH, EXCH_RATE_INPUT_FALLBACK_XPATH)
-        except Exception:
-            raise RuntimeError("Exchange Rate input not found (primary nor fallback).")
-
-    def _commit_rate_field(self, times: int = 1):
-        el = self._el()
-        inp = self._find_rate_input()
-        try:
-            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
-        except Exception:
-            pass
-        try:
-            inp.click()
-        except Exception:
-            el.js_click(inp)
-
-        try:
-            ac = ActionChains(self.driver)
-            for _ in range(max(1, times)):
-                ac.send_keys(Keys.ENTER).pause(0.05)
-            ac.send_keys(Keys.TAB)
-            ac.perform()
-        except Exception:
-            try:
-                inp.send_keys(Keys.ENTER); inp.send_keys(Keys.TAB)
-            except Exception: pass
-
-        # JS fallback to trigger UI5 hooks
-        try:
-            inner_id = inp.get_attribute("id") or ""
-            self.driver.execute_script(
-                """
-                try{
-                  var el=arguments[0], innerId=arguments[1];
-                  if(el){
-                      el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
-                      el.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',bubbles:true}));
-                      el.dispatchEvent(new Event('change',{bubbles:true}));
-                      el.dispatchEvent(new Event('blur',{bubbles:true}));
-                  }
-                  var ctrlId = innerId && innerId.endsWith('-inner') ? innerId.slice(0,-6) : innerId;
-                  var ctrl=sap && sap.ui && sap.ui.getCore ? sap.ui.getCore().byId(ctrlId) : null;
-                  if(ctrl){
-                      if (typeof ctrl.onsapenter === 'function') { ctrl.onsapenter(); }
-                      if (typeof ctrl.fireChange === 'function') { ctrl.fireChange({ value: ctrl.getValue ? ctrl.getValue() : undefined }); }
-                  }
-                }catch(e){}
-                """,
-                inp, inner_id
-            )
-        except Exception:
-            pass
-
-        wait_ui5_idle(self.driver, timeout=el._timeout)
-        self._wait_not_busy(el._timeout)
-
-    def _set_rate_value_via_typing(self, rate_val: str | float | Decimal):
-        num = Decimal(str(rate_val))
-        if num <= 0:
-            raise ValueError("rate_val must be > 0")
-        s = self._format_rate_locale(num)
-        inp = self._find_rate_input()
-        self._hard_clear(inp)
-        inp.send_keys(s)
-        try: inp.send_keys(Keys.TAB)
-        except Exception: pass
-        wait_ui5_idle(self.driver, timeout=self._el()._timeout)
-        self._wait_not_busy(self._el()._timeout)
-
-    # ---- Fallback UI5 setValue ----
-    def _set_rate_value_ui5(self, rate_val: str | float | Decimal):
-        el = self._el()
-        inp = self._find_rate_input()
-        inner_id = inp.get_attribute("id")
-        if not inner_id:
-            raise RuntimeError("Exchange Rate input has no DOM id")
-
-        res = self.driver.execute_script(
-            """
-            try{
-              var innerId=arguments[0], num=Number(String(arguments[1]).replace(',','.'));
-              if(!isFinite(num) || num<=0){ return {ok:false, reason:'nonpositive'}; }
-              var ctrlId = innerId.endsWith('-inner') ? innerId.slice(0,-6) : innerId;
-              var ctrl = sap && sap.ui && sap.ui.getCore ? sap.ui.getCore().byId(ctrlId) : null;
-              var fmt = (sap && sap.ui && sap.ui.core && sap.ui.core.format && sap.ui.core.format.NumberFormat)
-                        ? sap.ui.core.format.NumberFormat.getFloatInstance({maxFractionDigits:5,minFractionDigits:5,groupingEnabled:false})
-                        : null;
-              var s = fmt ? fmt.format(num) : num.toFixed(5);
-
-              if(ctrl && ctrl.setValue){
-                  ctrl.setValue(s);
-                  if (ctrl.fireLiveChange) ctrl.fireLiveChange({ value: s });
-                  if (ctrl.fireChange)     ctrl.fireChange({ value: s });
-              }
-              var el = document.getElementById(innerId);
-              if(el){
-                  el.focus();
-                  el.value = s;
-                  el.dispatchEvent(new Event('input',{bubbles:true}));
-                  el.dispatchEvent(new Event('change',{bubbles:true}));
-              }
-              var parsed = fmt ? fmt.parse(s) : Number(s.replace(',','.'));
-              return {ok:(typeof parsed==='number' && parsed>0), shown:s, parsed:parsed};
-            }catch(e){ return {ok:false, reason:String(e)}; }
-            """,
-            inner_id, str(rate_val)
-        )
-        wait_ui5_idle(self.driver, timeout=el._timeout)
-        self._wait_not_busy(el._timeout)
-        if not res or not res.get("ok"):
-            snap = self._screenshot("rate_set_failed")
-            raise RuntimeError(f"Could not set Exchange Rate via UI5. Result={res}. Screenshot: {snap}")
-
-    # -------- Observability helpers --------
-    def _has_validation_errors(self) -> str | None:
-        try:
-            bad_inputs = self.driver.find_elements(By.XPATH, ANY_INVALID_INPUT_XPATH)
-            if bad_inputs:
-                messages = []
-                for el_ in bad_inputs:
-                    try:
-                        err_id = el_.get_attribute("aria-errormessage") or ""
-                        msg = self.driver.execute_script(
-                            "var id=arguments[0];"
-                            "var n=id?document.getElementById(id):null;"
-                            "return n? (n.innerText || n.textContent || '').trim():'';", err_id)
-                        if msg: messages.append(msg)
-                    except Exception:
-                        continue
-                if messages: return "; ".join(sorted(set(messages)))
-                return f"{len(bad_inputs)} invalid field(s)."
-            wrappers = self.driver.find_elements(By.XPATH, ANY_ERROR_WRAPPER_XPATH)
-            if wrappers: return f"{len(wrappers)} field wrapper(s) in error state."
-        except Exception:
-            pass
-        return None
+    # ---- DONE gate via object header ----
+    def _wait_object_header_ready(self, timeout: int) -> bool:
+        return ObjectHeaderVerifier(self.driver).wait_ready(timeout=timeout)
 
     def _wait_for_success_toast_or_list(self, timeout: int) -> dict:
-        el = self._el()
-        end = time.time() + max(timeout, el._timeout)
+        listbar = ListToolbar(self.driver)
+        dlg = DialogWatcher(self.driver)
+        end = time.time() + max(timeout, self._el()._timeout)
         info = {"toast": "", "dialog": "", "at_list": False}
         while time.time() < end:
-            if self._dialog_open():
-                info["dialog"] = self._capture_dialog_text() or "Dialog open (no text captured)."
+            if dlg.is_open():
+                info["dialog"] = dlg.text() or "Dialog open (no text captured)."
                 return info
+            txt = ToastReader(self.driver).read_last()
+            if txt:
+                info["toast"] = txt
+                lt = txt.lower()
+                if any(k in lt for k in ("created", "saved", "activated", "has been created", "successfully")):
+                    return info
             try:
-                txt = self.driver.execute_script(
-                    "var nodes=document.querySelectorAll(arguments[0]);"
-                    "if(!nodes||nodes.length===0) return '';"
-                    "var t=nodes[nodes.length-1];"
-                    "return (t.innerText||t.textContent||'').trim();",
-                    MESSAGE_TOAST_CSS,
-                )
-                if isinstance(txt, str) and txt:
-                    info["toast"] = txt
-            except Exception:
-                pass
-            try:
-                _ = WebDriverWait(self.driver, 0.8).until(
-                    EC.element_to_be_clickable((By.XPATH, CREATE_BUTTON_XPATH))
-                )
+                listbar.wait_create_clickable(timeout=0.8)
                 info["at_list"] = True
                 return info
             except Exception:
@@ -441,185 +150,7 @@ class CurrencyExchangeRatesPage(Page):
             time.sleep(0.18)
         return info
 
-    # ---- DONE gate: wait until the Object Page header is really there ----
-    def _wait_object_header_ready(self, timeout: int) -> bool:
-        t0 = time.time()
-        try:
-            WebDriverWait(self.driver, min(6, timeout)).until(
-                EC.presence_of_element_located((By.XPATH, OBJECT_HEADER_CONTENT_XPATH))
-            )
-        except TimeoutException:
-            return False
-        # Make sure it actually shows values (like the Exchange Rate text)
-        while time.time() - t0 < min(timeout, 10):
-            try:
-                span = self.driver.find_element(By.XPATH, OBJECT_HEADER_RATE_VALUE_XPATH)
-                if (span.text or "").strip():
-                    return True
-            except Exception:
-                pass
-            time.sleep(0.15)
-        return False
-
-    # ---- Close side column (X) or force FCL → OneColumn; fallback to list deep-link ----
-    def _close_side_column_if_present(self, timeout: int | None = None) -> bool:
-        el = self._el()
-        t = timeout or max(el._timeout, 20)
-
-        # If we're already back to list, done
-        try:
-            WebDriverWait(self.driver, 1.0).until(EC.element_to_be_clickable((By.XPATH, CREATE_BUTTON_XPATH)))
-            return True
-        except Exception:
-            pass
-
-        # 1) Try DOM close button (cover multiple ids/variants)
-        try:
-            btn = WebDriverWait(self.driver, min(5, t)).until(
-                EC.element_to_be_clickable((By.XPATH, CLOSE_COLUMN_BTN_XPATH))
-            )
-            try:
-                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
-            except Exception:
-                pass
-            try:
-                btn.click()
-            except Exception:
-                el.js_click(btn)
-            wait_ui5_idle(self.driver, timeout=min(6, t))
-            self._wait_not_busy(min(6, t))
-        except TimeoutException:
-            # 2) JS sweep: click any closeColumn* button
-            try:
-                did = self.driver.execute_script(
-                    """
-                    try{
-                      var q = document.querySelectorAll(
-                        "button[id$='--closeColumn'],button[id$='--closeColumnBtn'],button[id*='closeColumn']"
-                      );
-                      for (var i=q.length-1;i>=0;i--){
-                        var b=q[i];
-                        var cs=window.getComputedStyle(b);
-                        if(b && b.offsetParent && cs.visibility!=='hidden' && cs.display!=='none'){ b.click(); return 'clicked-dom'; }
-                      }
-                      return 'none';
-                    }catch(e){ return 'err:'+e; }
-                    """
-                )
-            except Exception:
-                did = "err"
-            wait_ui5_idle(self.driver, timeout=2)
-            self._wait_not_busy(2)
-
-            # 3) UI5 control path: set FCL layout to OneColumn
-            if did != "clicked-dom":
-                try:
-                    mode = self.driver.execute_script(
-                        """
-                        try{
-                          var core=sap && sap.ui && sap.ui.getCore && sap.ui.getCore();
-                          if(!core) return 'no-core';
-                          var all = core && core.mElements ? Object.values(core.mElements) : [];
-                          var fcl=null, name='';
-                          for (var i=0;i<all.length;i++){
-                            var c=all[i];
-                            try{
-                              name=c.getMetadata && c.getMetadata().getName && c.getMetadata().getName();
-                              if(name==='sap.f.FlexibleColumnLayout'){ fcl=c; break; }
-                            }catch(e){}
-                          }
-                          if(fcl && fcl.setLayout){
-                            var LT = sap.f && sap.f.LayoutType;
-                            var one = (LT && LT.OneColumn) || 'OneColumn';
-                            fcl.setLayout(one);
-                            return 'set-one-column';
-                          }
-                          return 'no-fcl';
-                        }catch(e){ return 'err:'+e; }
-                        """
-                    )
-                except Exception:
-                    mode = "err"
-                wait_ui5_idle(self.driver, timeout=2)
-                self._wait_not_busy(2)
-
-        # Confirm we are back on list; fallback hard-navigate if not
-        try:
-            WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, CREATE_BUTTON_XPATH)))
-            return True
-        except Exception:
-            self.back_to_list()
-            return True
-
-    # -------- Footer Create clicks (staleness-safe; never closes dialog) --------
-    def _click_footer_create(self, clicks: int = 1) -> dict:
-        el = self._el()
-        info = {"clicks": 0, "dialogs": [], "toasts": []}
-        wait = WebDriverWait(self.driver, max(el._timeout, 25))
-
-        def _find_footer_btn():
-            try:
-                return wait.until(EC.element_to_be_clickable((By.XPATH, ACTIVATE_CREATE_BTN_XPATH)))
-            except TimeoutException:
-                return wait.until(EC.element_to_be_clickable((By.XPATH, FORM_CREATE_OR_SAVE_BTN_XPATH)))
-
-        for _ in range(max(1, clicks)):
-            if self._dialog_open():
-                info["dialogs"].append(self._capture_dialog_text() or "")
-                break
-
-            clicked_this_round = False
-            for attempt in range(4):
-                try:
-                    btn = _find_footer_btn()
-                    try:
-                        self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
-                    except Exception:
-                        pass
-                    try:
-                        btn.click(); clicked_this_round = True; break
-                    except ElementClickInterceptedException:
-                        try:
-                            btn2 = _find_footer_btn()
-                            self.driver.execute_script("arguments[0].click();", btn2)
-                            clicked_this_round = True; break
-                        except StaleElementReferenceException:
-                            continue
-                    except StaleElementReferenceException:
-                        continue
-                except TimeoutException:
-                    time.sleep(0.2); continue
-                except Exception:
-                    time.sleep(0.2); continue
-
-            if not clicked_this_round:
-                continue
-
-            info["clicks"] += 1
-            wait_ui5_idle(self.driver, timeout=max(el._timeout, 25))
-            self._wait_not_busy(max(el._timeout, 25))
-
-            try:
-                txt = self.driver.execute_script(
-                    "var nodes=document.querySelectorAll(arguments[0]);"
-                    "if(!nodes||nodes.length===0) return '';"
-                    "var t=nodes[nodes.length-1];"
-                    "return (t.innerText||t.textContent||'').trim();",
-                    MESSAGE_TOAST_CSS,
-                )
-                if isinstance(txt, str) and txt:
-                    info["toasts"].append(txt)
-            except Exception:
-                pass
-            time.sleep(0.25)
-
-            if self._dialog_open():
-                info["dialogs"].append(self._capture_dialog_text() or "")
-                break
-
-        return info
-
-    # -------- Public: create + submit with verification --------
+    # -------- Public: create + submit with 4-stage flow --------
     def create_entry_and_submit(
         self,
         exch_type: str,
@@ -628,124 +159,214 @@ class CurrencyExchangeRatesPage(Page):
         valid_from_mmddyyyy: str,
         quotation: str,
         rate_str: str,
+        commit_gate=None,   # gate only for the Create/Activate phase
     ) -> dict:
-        el = self._el()
-        self.ensure_in_app()
+        # Elements
+        fields = Fields(self.driver)
+        factors = Factors(self.driver)
+        quote = QuotationField(self.driver)
+        rate = ExchangeRateField(self.driver)
+        footer = FooterActions(self.driver)
+        listbar = ListToolbar(self.driver)
+        dlg = DialogWatcher(self.driver)
+        sidecol = SideColumnController(self.driver)
+        validate = ValidationInspector(self.driver)
 
-        # 1) Open form
+        el = self._el()
+        self.ensure_in_app(max_attempts=3, settle_each=8)
+
+        # ---------- local helpers ----------
+        def _noop_gate_ctx():
+            class _C:
+                def __enter__(self): return None
+                def __exit__(self, *a): return False
+            return _C()
+
+        def _close_msg_popover_if_open():
+            try:
+                self.driver.execute_script(
+                    """
+                    try{
+                    var b = document.querySelector('.sapMMsgPopoverCloseBtn');
+                    if (b && b.offsetParent) { b.click(); return true; }
+                    return false;
+                    }catch(e){ return false; }
+                    """
+                )
+            except Exception:
+                pass
+
+        def _fill_all_fields(prefer_ui5_for_rate: bool = False):
+            # ALL PARALLEL-SAFE
+            fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, exch_type, press_enter=True)
+            fields.set_plain_input(fields.FROM_CCY_INPUT_XPATH, from_ccy, press_enter=True)
+            fields.set_plain_input(fields.TO_CCY_INPUT_XPATH, to_ccy, press_enter=True)
+            fields.set_plain_input(fields.VALID_FROM_INPUT_XPATH, valid_from_mmddyyyy, press_enter=True)
+            quote.set_value(quotation)
+            factors.try_set_from("1")
+            factors.try_set_to("1")
+            if prefer_ui5_for_rate:
+                rate.set_via_ui5(rate_str)
+                rate.commit(times=1)
+            else:
+                rate.set_via_typing(rate_str)
+                rate.commit(times=2)
+            wait_ui5_idle(self.driver, timeout=el._timeout)
+            self._wait_not_busy(el._timeout)
+
+        def _looks_like_required_fields_issue(msgs: list[dict]) -> bool:
+            if not msgs:
+                return False
+            blob = " | ".join(
+                f"{(m.get('message') or '')} {m.get('description') or ''}".lower()
+                for m in msgs
+            )
+            keys = (
+                "fill out all required",
+                "required entry fields",
+                "required field",
+                "mandatory field",
+                "exchange rate type",
+                "from currency",
+            )
+            return any(k in blob for k in keys)
+
+        def _commit_flow_under_gate() -> dict:
+            gate_ctx = commit_gate() if callable(commit_gate) else _noop_gate_ctx()
+            with gate_ctx:
+                # 4) Submit attempt 1 (Create/Activate once)
+                first_phase = footer.click_create(clicks=1)
+                if first_phase.get("dialogs"):
+                    snap = self._screenshot("dialog_open_after_click")
+                    return {
+                        "status": "dialog_open",
+                        "footer_clicks": first_phase.get("clicks", 0),
+                        "intermediate_toasts": first_phase.get("toasts", []),
+                        "dialog_open": True,
+                        "dialog_text": first_phase["dialogs"][-1],
+                        "screenshot": snap,
+                    }
+
+                # 5) Primary success gate: object header ready
+                header_ready = self._wait_object_header_ready(timeout=min(10, max(8, el._timeout)))
+                if header_ready:
+                    sidecol.close_if_present(timeout=min(12, max(10, el._timeout)))
+                    snap = self._screenshot("after_create_closed")
+                    return {
+                        "status": "created",
+                        "footer_clicks": 1,
+                        "intermediate_toasts": first_phase.get("toasts", []),
+                        "toast": self._read_last_toast_text(),
+                        "at_list": True,
+                        "dialog_open": False,
+                        "dialog_text": "",
+                        "screenshot": snap,
+                    }
+
+                # 6) Fallback: loop clicking until DONE (handles “kept as draft”)
+                loop_res = footer.ensure_created_by_loop_clicking(
+                    object_header_ready=lambda: self._wait_object_header_ready(timeout=4),
+                    at_list=lambda: listbar.is_at_list(quick=0.8),
+                    close_side=lambda: sidecol.close_if_present(timeout=max(8, el._timeout)),
+                    total_timeout=max(60, el._timeout + 6),
+                    max_clicks=10,  # STRICT: up to 10 presses before giving up
+                )
+                if loop_res.get("status") in ("created", "dialog_open", "activation_error"):
+                    return loop_res  # include activation_error so caller can decide to refill
+
+                # 7) Last fallback (toast or list), then force back to list if still stuck
+                final_phase = self._wait_for_success_toast_or_list(timeout=max(el._timeout, 18))
+                if not final_phase.get("at_list"):
+                    sidecol.close_if_present(timeout=min(12, max(10, el._timeout)))
+
+                snap = self._screenshot("after_create_final")
+                if final_phase.get("dialog"):
+                    return {
+                        "status": "dialog_open",
+                        "footer_clicks": 1 + loop_res.get("footer_clicks", 0),
+                        "intermediate_toasts": first_phase.get("toasts", []) + loop_res.get("intermediate_toasts", []),
+                        "toast": final_phase.get("toast", ""),
+                        "dialog_open": True,
+                        "dialog_text": final_phase.get("dialog", ""),
+                        "screenshot": snap,
+                    }
+
+                status_guess = "created" if (
+                    final_phase.get("at_list")
+                    or (final_phase.get("toast") and any(k in final_phase.get("toast", "").lower()
+                        for k in ("created", "activated", "successfully")))
+                ) else "unknown"
+
+                if status_guess != "created":
+                    strict = footer.ensure_created_by_loop_clicking(
+                        object_header_ready=lambda: self._wait_object_header_ready(timeout=4),
+                        at_list=lambda: listbar.is_at_list(quick=0.8),
+                        close_side=lambda: sidecol.close_if_present(timeout=max(8, el._timeout)),
+                        total_timeout=max(30, el._timeout),
+                        max_clicks=10,
+                    )
+                    if strict.get("status") == "created":
+                        return strict
+
+                return {
+                    "status": status_guess,
+                    "footer_clicks": 1 + loop_res.get("footer_clicks", 0),
+                    "intermediate_toasts": first_phase.get("toasts", []) + loop_res.get("intermediate_toasts", []),
+                    "toast": final_phase.get("toast", ""),
+                    "at_list": True,
+                    "dialog_open": False,
+                    "dialog_text": "",
+                    "screenshot": snap,
+                }
+
+        # ---------- 1) Open form ----------
         self._click_list_create(timeout=el._timeout)
         self._screenshot("before_fill")
 
-        # 2) Fill
-        self._set_plain_input(EXCH_TYPE_INPUT_XPATH, exch_type)
-        self._set_plain_input(FROM_CCY_INPUT_XPATH, from_ccy, press_enter=True)
-        self._set_plain_input(TO_CCY_INPUT_XPATH, to_ccy, press_enter=True)
-        self._set_plain_input(VALID_FROM_INPUT_XPATH, valid_from_mmddyyyy, press_enter=True)
-        self._set_quotation_value(quotation)
-        self._try_set_factor_by_label(FROM_FACTOR_BY_LABEL_XPATH, "1")
-        self._try_set_factor_by_label(TO_FACTOR_BY_LABEL_XPATH, "1")
+        # ---------- 2) Fill fields (parallel-safe) ----------
+        _fill_all_fields(prefer_ui5_for_rate=False)
 
-        self._set_rate_value_via_typing(rate_str)
-        self._commit_rate_field(times=2)
-
-        wait_ui5_idle(self.driver, timeout=el._timeout)
-        self._wait_not_busy(el._timeout)
-
-        # 3) Pre-submit validation
-        err = self._has_validation_errors()
-        if err and "greater than zero" in err.lower():
-            self._try_set_factor_by_label(FROM_FACTOR_BY_LABEL_XPATH, "1")
-            self._try_set_factor_by_label(TO_FACTOR_BY_LABEL_XPATH, "1")
-            self._set_rate_value_ui5(rate_str)
-            self._commit_rate_field(times=1)
+        # ---------- 3) Pre-submit validation (client) ----------
+        err = validate.collect()
+        if err and "greater than zero" in (err or "").lower():
+            factors.try_set_from("1")
+            factors.try_set_to("1")
+            rate.set_via_ui5(rate_str)
+            rate.commit(times=1)
             wait_ui5_idle(self.driver, timeout=el._timeout)
             self._wait_not_busy(el._timeout)
-            err = self._has_validation_errors()
+            err = validate.collect()  # informational re-check
 
-        if err:
-            snap = self._screenshot("validation_error")
-            return {
-                "status": "validation_error",
-                "error": err,
-                "screenshot": snap,
-                "dialog_open": self._dialog_open(),
-                "dialog_text": self._capture_dialog_text() if self._dialog_open() else "",
-            }
+        # ---------- 4..7) COMMIT under gate ----------
+        res = _commit_flow_under_gate()
+        if res.get("status") == "activation_error" and _looks_like_required_fields_issue(res.get("messages", [])):
+            # Close message popover, REFILL, then try again (still only serializing the commit itself)
+            _close_msg_popover_if_open()
+            _fill_all_fields(prefer_ui5_for_rate=True)
+            res2 = _commit_flow_under_gate()
+            if res2.get("status") in ("created", "dialog_open"):
+                return res2
+            # if still not created, return the second attempt result (more informative)
+            return res2
+        return res
 
-        # 4) Submit
-        first_phase = self._click_footer_create(clicks=2)
-        if first_phase.get("dialogs"):
-            snap = self._screenshot("dialog_open_after_click")
-            return {
-                "status": "dialog_open",
-                "footer_clicks": first_phase.get("clicks", 0),
-                "intermediate_toasts": first_phase.get("toasts", []),
-                "dialog_open": True,
-                "dialog_text": first_phase["dialogs"][-1],
-                "screenshot": snap,
-            }
-
-        # 5) DONE gate: prefer header readiness, then close side column
-        header_ready = self._wait_object_header_ready(timeout=min(10, max(8, el._timeout)))
-        if header_ready:
-            self._close_side_column_if_present(timeout=min(12, max(10, el._timeout)))
-            snap = self._screenshot("after_create_closed")
-            return {
-                "status": "created",
-                "footer_clicks": first_phase.get("clicks", 0),
-                "intermediate_toasts": first_phase.get("toasts", []),
-                "toast": "",
-                "at_list": True,
-                "dialog_open": False,
-                "dialog_text": "",
-                "screenshot": snap,
-            }
-
-        # Fallback (toast or already at list)
-        final_phase = self._wait_for_success_toast_or_list(timeout=max(el._timeout, 18))
-        if not final_phase.get("at_list"):
-            # Even if no toast/list detected, force back to list to proceed
-            self._close_side_column_if_present(timeout=min(12, max(10, el._timeout)))
-
-        snap = self._screenshot("after_create")
-        if final_phase.get("dialog"):
-            return {
-                "status": "dialog_open",
-                "footer_clicks": first_phase.get("clicks", 0),
-                "intermediate_toasts": first_phase.get("toasts", []),
-                "toast": final_phase.get("toast", ""),
-                "dialog_open": True,
-                "dialog_text": final_phase.get("dialog", ""),
-                "screenshot": snap,
-            }
-
-        # Final sanity check
-        err2 = self._has_validation_errors()
-        info = {
-            "status": "created" if final_phase.get("at_list") or final_phase.get("toast") else "unknown",
-            "footer_clicks": first_phase.get("clicks", 0),
-            "intermediate_toasts": first_phase.get("toasts", []),
-            "toast": final_phase.get("toast", ""),
-            "at_list": True,   # we forced back to list if needed
-            "dialog_open": False,
-            "dialog_text": "",
-            "screenshot": snap,
-        }
-        if err2:
-            info["status"] = "validation_error"
-            info["validation_after"] = err2
-        return info
-
-    # -------- Compatibility shim used by routes/currency.py --------
     def create_rate(
         self,
         exch_type: str,
         from_ccy: str,
-        to_ccy: str,
-        valid_from_mmddyyyy: str,
-        quotation: str,
-        rate_value: str | float,
+        to_ccy: str | None = None,          # expected by your batch
+        valid_from_mmddyyyy: str = "",
+        quotation: str = "",
+        rate_value: str | float = "",
+        to_cy: str | None = None,           # legacy/typo alias (optional)
+        commit_gate=None,                   # <── NEW: pass-through to submit phase
     ) -> dict:
+        # allow both names; prefer to_ccy
+        if to_ccy is None and to_cy is not None:
+            to_ccy = to_cy
+        if to_ccy is None:
+            raise TypeError("create_rate() missing required argument: 'to_ccy'")
+
         return self.create_entry_and_submit(
             exch_type=exch_type,
             from_ccy=from_ccy,
@@ -753,4 +374,5 @@ class CurrencyExchangeRatesPage(Page):
             valid_from_mmddyyyy=valid_from_mmddyyyy,
             quotation=quotation,
             rate_str=str(rate_value),
+            commit_gate=commit_gate,
         )

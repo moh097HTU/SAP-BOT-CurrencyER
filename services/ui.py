@@ -1,10 +1,11 @@
 # services/ui.py
 from selenium.webdriver.support.ui import WebDriverWait
 from services.config import EXPLICIT_WAIT_SEC
+from core.base import fluent_wait
 
 def _wait_js(driver, script: str, timeout: int) -> bool:
     try:
-        WebDriverWait(driver, timeout).until(lambda d: bool(d.execute_script(script)))
+        fluent_wait(driver, timeout).until(lambda d: bool(d.execute_script(script)))
         return True
     except Exception:
         return False
@@ -17,7 +18,7 @@ def wait_for_shell_home(driver, timeout: int | None = None) -> bool:
     """
     t = timeout or EXPLICIT_WAIT_SEC
     try:
-        WebDriverWait(driver, t).until(
+        fluent_wait(driver, t).until(
             lambda d: "shell-home" in (d.current_url or "").lower()
         )
         return True
@@ -57,14 +58,14 @@ def wait_ui5_idle(driver, timeout: int | None = None) -> bool:
 def wait_url_contains(driver, needle: str, timeout: int | None = None) -> bool:
     t = timeout or EXPLICIT_WAIT_SEC
     try:
-        WebDriverWait(driver, t).until(
+        fluent_wait(driver, t).until(
             lambda d: needle.lower() in (d.current_url or "").lower()
         )
         return True
     except Exception:
         return False
 
-# ---------- NEW: robust shell search readiness + JS fallback ----------
+# ---------- Robust shell search readiness + JS fallback ----------
 
 def wait_shell_search_ready(driver, timeout: int | None = None) -> bool:
     """

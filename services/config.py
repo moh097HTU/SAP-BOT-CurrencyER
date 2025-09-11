@@ -30,6 +30,9 @@ def config():
         "PAGELOAD_TIMEOUT_SECONDS": _as_int(os.getenv("PAGELOAD_TIMEOUT_SECONDS", "90"), 90),
         "KEEP_BROWSER": _as_bool(os.getenv("KEEP_BROWSER", "true")),
         "SCREENSHOT_PATH": os.getenv("SCREENSHOT_PATH", "after_click.png"),
+
+        # NEW: multithreading control
+        "NUM_WORKERS": _as_int(os.getenv("NUM_WORKERS", "4"), 4),
     }
 
 # Legacy convenience
