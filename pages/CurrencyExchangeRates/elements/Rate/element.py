@@ -85,7 +85,7 @@ class ExchangeRateField(Element):
         try:
             ac = ActionChains(self.driver)
             for _ in range(max(1, times)):
-                ac.send_keys(Keys.ENTER).pause(0.05)
+                ac.send_keys(Keys.ENTER).pause(0.03)
             ac.send_keys(Keys.TAB)
             ac.perform()
         except Exception:
@@ -93,32 +93,8 @@ class ExchangeRateField(Element):
                 inp.send_keys(Keys.ENTER); inp.send_keys(Keys.TAB)
             except Exception: pass
 
-        try:
-            inner_id = inp.get_attribute("id") or ""
-            self.driver.execute_script(
-                """
-                try{
-                  var el=arguments[0], innerId=arguments[1];
-                  if(el){
-                      el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
-                      el.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',bubbles:true}));
-                      el.dispatchEvent(new Event('change',{bubbles:true}));
-                      el.dispatchEvent(new Event('blur',{bubbles:true}));
-                  }
-                  var ctrlId = innerId && innerId.endsWith('-inner') ? innerId.slice(0,-6) : innerId;
-                  var ctrl=sap && sap.ui && sap.ui.getCore ? sap.ui.getCore().byId(ctrlId) : null;
-                  if(ctrl){
-                      if (typeof ctrl.onsapenter === 'function') { ctrl.onsapenter(); }
-                      if (typeof ctrl.fireChange === 'function') { ctrl.fireChange({ value: ctrl.getValue ? ctrl.getValue() : undefined }); }
-                  }
-                }catch(e){}
-                """,
-                inp, inner_id
-            )
-        except Exception:
-            pass
-
-        wait_ui5_idle(self.driver, timeout=self._timeout)
+        # trimmed post-commit idle wait
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
 
     def set_via_typing(self, rate_val: str | float | Decimal):
         num = Decimal(str(rate_val))
@@ -130,7 +106,7 @@ class ExchangeRateField(Element):
         inp.send_keys(s)
         try: inp.send_keys(Keys.TAB)
         except Exception: pass
-        wait_ui5_idle(self.driver, timeout=self._timeout)
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
 
     def set_via_ui5(self, rate_val: str | float | Decimal):
         inp = self._find_input()
@@ -168,6 +144,6 @@ class ExchangeRateField(Element):
             """,
             inner_id, str(rate_val)
         )
-        wait_ui5_idle(self.driver, timeout=self._timeout)
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
         if not res or not res.get("ok"):
             raise RuntimeError(f"Could not set Exchange Rate via UI5. Result={res}.")

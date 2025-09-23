@@ -24,8 +24,11 @@ from .elements.Validation.element import ValidationInspector
 from .elements.SideColumn.element import SideColumnController
 from .elements.Header.element import ObjectHeaderVerifier
 
-
 class CurrencyExchangeRatesPage(Page):
+    def __init__(self, driver, root: Optional[str] = None):
+        super().__init__(driver, root)
+        self._app_ready_fast = False  # quick flag
+
     def _el(self) -> Element:
         return Element(self.driver)
 
@@ -39,16 +42,6 @@ class CurrencyExchangeRatesPage(Page):
 
     def _app_root_url(self) -> str:
         return f"{self._origin()}/ui?sap-ushell-config=lean{APP_HASH}"
-
-    def _screenshot(self, tag: str) -> str:
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        path = os.path.join("logs", f"rates_{tag}_{ts}.png")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        try:
-            self.driver.save_screenshot(path)
-            return path
-        except Exception:
-            return ""
 
     def _wait_not_busy(self, timeout: int) -> bool:
         end = time.time() + max(1, timeout)
@@ -75,13 +68,6 @@ class CurrencyExchangeRatesPage(Page):
 
     # -------- App navigation (hardened) --------
     def ensure_in_app(self, max_attempts: int = 2, settle_each: int = 8):
-        """
-        Guarantee we are on the list report of Currency Exchange Rates app:
-          - Deep-link to APP_HASH
-          - Wait for UI to settle
-          - Force FCL OneColumn if needed
-          - Confirm list 'Create' is clickable
-        """
         attempts = max(1, max_attempts)
         listbar = ListToolbar(self.driver)
         sidecol = SideColumnController(self.driver)
@@ -98,19 +84,34 @@ class CurrencyExchangeRatesPage(Page):
 
             try:
                 listbar.wait_create_clickable(timeout=max(60, self._el()._timeout))
+                self._app_ready_fast = True
                 return
             except TimeoutException:
                 self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
                 time.sleep(0.5)
 
-        snap = self._screenshot("ensure_in_app_timeout")
-        raise TimeoutException(f"ensure_in_app failed after {attempts} attempts. Screenshot: {snap}")
+        self._app_ready_fast = False
+        raise TimeoutException(f"ensure_in_app failed after {attempts} attempts.")
+
+    def ensure_in_app_quick(self):
+        """
+        Fast path: if the Create button is clickable within 1s, skip the heavy ensure.
+        """
+        if self._app_ready_fast:
+            try:
+                if ListToolbar(self.driver).is_at_list(quick=1.0):
+                    return
+            except Exception:
+                pass
+        # fallback to full ensure
+        self.ensure_in_app(max_attempts=3, settle_each=8)
 
     def back_to_list(self):
         listbar = ListToolbar(self.driver)
         self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
         wait_ui5_idle(self.driver, timeout=max(self._el()._timeout, 20))
         listbar.wait_create_clickable(timeout=max(60, self._el()._timeout))
+        self._app_ready_fast = True
 
     # -------- Internal helpers --------
     def _click_list_create(self, timeout: int | None = None):
@@ -122,7 +123,6 @@ class CurrencyExchangeRatesPage(Page):
     def _read_last_toast_text(self) -> str:
         return ToastReader(self.driver).read_last()
 
-    # ---- DONE gate via object header ----
     def _wait_object_header_ready(self, timeout: int) -> bool:
         return ObjectHeaderVerifier(self.driver).wait_ready(timeout=timeout)
 
@@ -150,7 +150,7 @@ class CurrencyExchangeRatesPage(Page):
             time.sleep(0.18)
         return info
 
-    # -------- Public: create + submit with 4-stage flow --------
+    # -------- Public: create + submit --------
     def create_entry_and_submit(
         self,
         exch_type: str,
@@ -159,9 +159,8 @@ class CurrencyExchangeRatesPage(Page):
         valid_from_mmddyyyy: str,
         quotation: str,
         rate_str: str,
-        commit_gate=None,   # gate only for the Create/Activate phase
+        commit_gate=None,   # only wraps the Create/Activate phase
     ) -> dict:
-        # Elements
         fields = Fields(self.driver)
         factors = Factors(self.driver)
         quote = QuotationField(self.driver)
@@ -173,7 +172,9 @@ class CurrencyExchangeRatesPage(Page):
         validate = ValidationInspector(self.driver)
 
         el = self._el()
-        self.ensure_in_app(max_attempts=3, settle_each=8)
+
+        # QUICK ensure to avoid heavy waits on every item
+        self.ensure_in_app_quick()
 
         # ---------- local helpers ----------
         def _noop_gate_ctx():
@@ -197,7 +198,6 @@ class CurrencyExchangeRatesPage(Page):
                 pass
 
         def _fill_all_fields(prefer_ui5_for_rate: bool = False):
-            # ALL PARALLEL-SAFE
             fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, exch_type, press_enter=True)
             fields.set_plain_input(fields.FROM_CCY_INPUT_XPATH, from_ccy, press_enter=True)
             fields.set_plain_input(fields.TO_CCY_INPUT_XPATH, to_ccy, press_enter=True)
@@ -211,8 +211,6 @@ class CurrencyExchangeRatesPage(Page):
             else:
                 rate.set_via_typing(rate_str)
                 rate.commit(times=2)
-            wait_ui5_idle(self.driver, timeout=el._timeout)
-            self._wait_not_busy(el._timeout)
 
         def _looks_like_required_fields_issue(msgs: list[dict]) -> bool:
             if not msgs:
@@ -234,24 +232,11 @@ class CurrencyExchangeRatesPage(Page):
         def _commit_flow_under_gate() -> dict:
             gate_ctx = commit_gate() if callable(commit_gate) else _noop_gate_ctx()
             with gate_ctx:
-                # 4) Submit attempt 1 (Create/Activate once)
                 first_phase = footer.click_create(clicks=1)
-                if first_phase.get("dialogs"):
-                    snap = self._screenshot("dialog_open_after_click")
-                    return {
-                        "status": "dialog_open",
-                        "footer_clicks": first_phase.get("clicks", 0),
-                        "intermediate_toasts": first_phase.get("toasts", []),
-                        "dialog_open": True,
-                        "dialog_text": first_phase["dialogs"][-1],
-                        "screenshot": snap,
-                    }
 
-                # 5) Primary success gate: object header ready
                 header_ready = self._wait_object_header_ready(timeout=min(10, max(8, el._timeout)))
                 if header_ready:
                     sidecol.close_if_present(timeout=min(12, max(10, el._timeout)))
-                    snap = self._screenshot("after_create_closed")
                     return {
                         "status": "created",
                         "footer_clicks": 1,
@@ -260,26 +245,22 @@ class CurrencyExchangeRatesPage(Page):
                         "at_list": True,
                         "dialog_open": False,
                         "dialog_text": "",
-                        "screenshot": snap,
                     }
 
-                # 6) Fallback: loop clicking until DONE (handles “kept as draft”)
                 loop_res = footer.ensure_created_by_loop_clicking(
                     object_header_ready=lambda: self._wait_object_header_ready(timeout=4),
                     at_list=lambda: listbar.is_at_list(quick=0.8),
                     close_side=lambda: sidecol.close_if_present(timeout=max(8, el._timeout)),
-                    total_timeout=max(60, el._timeout + 6),
-                    max_clicks=10,  # STRICT: up to 10 presses before giving up
+                    total_timeout=max(35, el._timeout),  # tightened cap
+                    max_clicks=5,                         # tightened cap
                 )
                 if loop_res.get("status") in ("created", "dialog_open", "activation_error"):
-                    return loop_res  # include activation_error so caller can decide to refill
+                    return loop_res
 
-                # 7) Last fallback (toast or list), then force back to list if still stuck
                 final_phase = self._wait_for_success_toast_or_list(timeout=max(el._timeout, 18))
                 if not final_phase.get("at_list"):
                     sidecol.close_if_present(timeout=min(12, max(10, el._timeout)))
 
-                snap = self._screenshot("after_create_final")
                 if final_phase.get("dialog"):
                     return {
                         "status": "dialog_open",
@@ -288,7 +269,6 @@ class CurrencyExchangeRatesPage(Page):
                         "toast": final_phase.get("toast", ""),
                         "dialog_open": True,
                         "dialog_text": final_phase.get("dialog", ""),
-                        "screenshot": snap,
                     }
 
                 status_guess = "created" if (
@@ -303,7 +283,7 @@ class CurrencyExchangeRatesPage(Page):
                         at_list=lambda: listbar.is_at_list(quick=0.8),
                         close_side=lambda: sidecol.close_if_present(timeout=max(8, el._timeout)),
                         total_timeout=max(30, el._timeout),
-                        max_clicks=10,
+                        max_clicks=5,
                     )
                     if strict.get("status") == "created":
                         return strict
@@ -316,52 +296,63 @@ class CurrencyExchangeRatesPage(Page):
                     "at_list": True,
                     "dialog_open": False,
                     "dialog_text": "",
-                    "screenshot": snap,
                 }
 
-        # ---------- 1) Open form ----------
+        # 1) Open form
         self._click_list_create(timeout=el._timeout)
-        self._screenshot("before_fill")
 
-        # ---------- 2) Fill fields (parallel-safe) ----------
+        # 2) Fill fields
         _fill_all_fields(prefer_ui5_for_rate=False)
 
-        # ---------- 3) Pre-submit validation (client) ----------
+        # 3) Pre-submit validation (client)
         err = validate.collect()
         if err and "greater than zero" in (err or "").lower():
             factors.try_set_from("1")
             factors.try_set_to("1")
             rate.set_via_ui5(rate_str)
             rate.commit(times=1)
-            wait_ui5_idle(self.driver, timeout=el._timeout)
-            self._wait_not_busy(el._timeout)
-            err = validate.collect()  # informational re-check
+            err = validate.collect()
 
-        # ---------- 4..7) COMMIT under gate ----------
+        # 4) COMMIT under narrow gate
         res = _commit_flow_under_gate()
+
+        if res.get("status") == "dialog_open":
+            dlg_text = (res.get("dialog_text") or "").lower()
+            if "fill out all required entry fields" in dlg_text and "exchange rate type" in dlg_text:
+                _close_msg_popover_if_open()
+                _fill_all_fields(prefer_ui5_for_rate=True)
+                res2 = _commit_flow_under_gate()
+                if res2.get("status") == "created":
+                    return res2
+                res2.setdefault("dialog_text", res.get("dialog_text", ""))
+                res2["status"] = "validation_error"
+                res2["reentered"] = True
+                return res2
+            return res
+
         if res.get("status") == "activation_error" and _looks_like_required_fields_issue(res.get("messages", [])):
-            # Close message popover, REFILL, then try again (still only serializing the commit itself)
             _close_msg_popover_if_open()
             _fill_all_fields(prefer_ui5_for_rate=True)
             res2 = _commit_flow_under_gate()
             if res2.get("status") in ("created", "dialog_open"):
                 return res2
-            # if still not created, return the second attempt result (more informative)
+            res2["status"] = "validation_error"
+            res2["reentered"] = True
             return res2
+
         return res
 
     def create_rate(
         self,
         exch_type: str,
         from_ccy: str,
-        to_ccy: str | None = None,          # expected by your batch
+        to_ccy: str | None = None,
         valid_from_mmddyyyy: str = "",
         quotation: str = "",
         rate_value: str | float = "",
-        to_cy: str | None = None,           # legacy/typo alias (optional)
-        commit_gate=None,                   # <── NEW: pass-through to submit phase
+        to_cy: str | None = None,
+        commit_gate=None,
     ) -> dict:
-        # allow both names; prefer to_ccy
         if to_ccy is None and to_cy is not None:
             to_ccy = to_cy
         if to_ccy is None:

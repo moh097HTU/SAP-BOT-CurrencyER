@@ -38,4 +38,5 @@ class Fields(Element):
             except Exception: pass
         try: inp.send_keys(Keys.TAB)
         except Exception: pass
-        wait_ui5_idle(self.driver, timeout=self._timeout)
+        # trimmed idle wait after simple field entry
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))

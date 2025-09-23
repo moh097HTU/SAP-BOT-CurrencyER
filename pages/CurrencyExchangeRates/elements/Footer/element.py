@@ -20,6 +20,7 @@ from .selectors import (
     HEADER_TITLE_ID_SUFFIX,
     EDIT_BTN_ID_SUFFIX,
     DISCARD_BTN_ID_SUFFIX,
+    COPY_BTN_ID_CONTAINS,
 )
 
 class FooterActions(Element):
@@ -29,7 +30,7 @@ class FooterActions(Element):
       - loop clicking with DOM/MessageManager checks
     """
 
-    EXTRA_SETTLE_SEC = 2.0  # hard settle after every press
+    EXTRA_SETTLE_SEC = 0.2  # was 0.5 — trimmed
 
     # ---------- finding & UI5 press helpers ----------
 
@@ -191,8 +192,6 @@ class FooterActions(Element):
         except Exception:
             return False
 
-    # ---------- DOM success predicate (from your HTML) ----------
-
     def _activated_dom(self) -> bool:
         try:
             has_edit    = bool(self._query_visible_by_suffix(EDIT_BTN_ID_SUFFIX))
@@ -206,12 +205,7 @@ class FooterActions(Element):
         except Exception:
             return False
 
-    # ---------- Public API: attempt once ----------
-
     def click_create(self, clicks: int = 1) -> dict:
-        """
-        One-shot (or limited) Create/Activate click(s), collecting toast & dialog.
-        """
         info = {"clicks": 0, "dialogs": [], "toasts": []}
         dlg = DialogWatcher(self.driver)
         reader = ToastReader(self.driver)
@@ -226,7 +220,7 @@ class FooterActions(Element):
                 continue
 
             info["clicks"] += 1
-            wait_ui5_idle(self.driver, timeout=max(self._timeout, 10))
+            wait_ui5_idle(self.driver, timeout=min(6, self._timeout))
             time.sleep(self.EXTRA_SETTLE_SEC)
 
             try:
@@ -242,15 +236,13 @@ class FooterActions(Element):
 
         return info
 
-    # ---------- Fallback loop (fluent) ----------
-
     def ensure_created_by_loop_clicking(
         self,
         object_header_ready: Callable[[], bool],
         at_list: Callable[[], bool],
         close_side: Callable[[], bool],
-        max_clicks: int = 10,
-        total_timeout: int = 60,
+        max_clicks: int = 5,       # was 10
+        total_timeout: int = 35,   # was 20/60 caps; now 35 default, caller may override
     ) -> Dict:
         dlg = DialogWatcher(self.driver)
         reader = ToastReader(self.driver)
@@ -270,9 +262,9 @@ class FooterActions(Element):
                     "footer_clicks": clicks,
                     "intermediate_toasts": toasts,
                     "messages": msgs.read_all(),
+                    "popover_text": msgs.popover_text(),
                 }
 
-            # Backend/UI5 message errors?
             if msgs.has_errors():
                 return {
                     "status": "activation_error",
@@ -281,9 +273,9 @@ class FooterActions(Element):
                     "footer_clicks": clicks,
                     "intermediate_toasts": toasts,
                     "messages": msgs.errors(),
+                    "popover_text": msgs.popover_text(),
                 }
 
-            # Already activated or at list?
             if self._activated_dom() or object_header_ready() or at_list():
                 close_side()
                 return {
@@ -293,15 +285,14 @@ class FooterActions(Element):
                     "footer_clicks": clicks,
                     "intermediate_toasts": toasts,
                     "messages": msgs.read_all(),
+                    "popover_text": msgs.popover_text(),
                 }
 
-            # Press
             if self._press_activate_best_effort():
                 clicks += 1
                 wait_ui5_idle(self.driver, timeout=min(6, self._timeout))
                 time.sleep(self.EXTRA_SETTLE_SEC)
 
-            # Toasts (telemetry & success keywords)
             try:
                 t = reader.read_last()
                 if t:
@@ -316,6 +307,7 @@ class FooterActions(Element):
                             "footer_clicks": clicks,
                             "intermediate_toasts": toasts,
                             "messages": msgs.read_all(),
+                            "popover_text": msgs.popover_text(),
                         }
             except Exception:
                 pass
@@ -334,4 +326,5 @@ class FooterActions(Element):
             "dialog_open": False if not dlg.is_open() else True,
             "dialog_text": dlg.text() if dlg.is_open() else "",
             "messages": msgs.read_all(),
+            "popover_text": msgs.popover_text(),
         }

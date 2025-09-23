@@ -11,7 +11,6 @@ class Factors(Element):
         except Exception:
             return False
         try:
-            # hard clear
             for fn in (
                 lambda: inp.clear(),
                 lambda: inp.send_keys(Keys.CONTROL, "a"),
@@ -27,7 +26,7 @@ class Factors(Element):
             inp.send_keys(value)
             try: inp.send_keys(Keys.TAB)
             except Exception: pass
-            wait_ui5_idle(self.driver, timeout=self._timeout)
+            wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
             return True
         except Exception:
             return False

@@ -3,6 +3,8 @@ from core.base import Element
 class Ui5Messages(Element):
     """
     Reads UI5 MessageManager; surfaces backend errors (why activation fails).
+    Also knows how to read the Message Popover DOM (title/subtitle/description)
+    which is what your HTML snippet shows.
     """
 
     def _get_data(self):
@@ -61,3 +63,53 @@ class Ui5Messages(Element):
             ))
         except Exception:
             return False
+
+    # ---------- NEW: Message Popover DOM reader ----------
+
+    def popover_text(self) -> str:
+        """
+        Returns a single-line string with Message Popover details if visible, else ''.
+        Format: "<title> | <subtitle> | <rich description>"
+
+        We only treat it as 'error' if the popover has an error icon/strip.
+        """
+        try:
+            txt = self.driver.execute_script(
+                """
+                try{
+                  function visible(el){
+                    if(!el) return false;
+                    var cs = getComputedStyle(el);
+                    if(cs.display==='none'||cs.visibility==='hidden') return false;
+                    var r = el.getBoundingClientRect();
+                    return r.width>0 && r.height>0;
+                  }
+
+                  var wrap = document.querySelector('.sapMPopoverWrapper');
+                  if(!wrap || !visible(wrap)) return '';
+
+                  var errIcon = wrap.querySelector('.sapMMsgViewDescIconError');
+                  var errStrip = document.querySelector('.sapMMsgStrip.sapMMsgStripError');
+                  var isErr = !!(errIcon || errStrip);
+
+                  // grab fields
+                  var titleEl = wrap.querySelector('.sapMMsgView .sapMMsgViewTitleText .sapMLnkText');
+                  var subEl   = wrap.querySelector('.sapMMsgView .sapMMsgViewSubtitleText');
+                  var descEl  = wrap.querySelector('.sapMMsgView .sapMMsgViewDescriptionText');
+
+                  var title = titleEl ? (titleEl.innerText||titleEl.textContent||'').trim() : '';
+                  var sub   = subEl   ? (subEl.innerText||subEl.textContent||'').trim() : '';
+                  var desc  = descEl  ? (descEl.innerText||descEl.textContent||'').trim() : '';
+
+                  if(!isErr && !title && !desc) return '';
+                  var parts = [];
+                  if(title) parts.push(title);
+                  if(sub)   parts.push(sub);
+                  if(desc)  parts.push(desc);
+                  return parts.join(' | ');
+                }catch(e){ return ''; }
+                """
+            )
+            return (txt or "").strip()
+        except Exception:
+            return ""

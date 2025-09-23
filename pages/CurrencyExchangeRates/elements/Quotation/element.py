@@ -31,7 +31,7 @@ class QuotationField(Element):
         inp.send_keys(value)
         inp.send_keys(Keys.ENTER)
         inp.send_keys(Keys.TAB)
-        wait_ui5_idle(self.driver, timeout=self._timeout)
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
 
         cur = (inp.get_attribute("value") or "").strip()
         if cur.lower() != value.strip().lower():
@@ -42,9 +42,9 @@ class QuotationField(Element):
             except Exception:
                 try: inp.send_keys(Keys.ALT, Keys.DOWN)
                 except Exception: pass
-            wait_ui5_idle(self.driver, timeout=self._timeout)
+            wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
             opt_xpath = QUOTATION_OPTION_BY_TEXT_XPATH.format(TEXT=value.strip())
             option = wait.until(EC.element_to_be_clickable((By.XPATH, opt_xpath)))
             try: option.click()
             except Exception: self.js_click(option)
-            wait_ui5_idle(self.driver, timeout=self._timeout)
+            wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))

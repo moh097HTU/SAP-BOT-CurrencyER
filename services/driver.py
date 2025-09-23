@@ -68,7 +68,7 @@ def get_driver(headless: bool = True) -> webdriver.Chrome:
     options.add_argument("--profile-directory=Default")
 
     # Typical stability flags
-    options.add_argument("--disable-gpu")
+    #options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-extensions")
