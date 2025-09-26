@@ -291,6 +291,11 @@ class BatchRunner:
                             rows = r.get("results", [])
                             for row in rows:
                                 row["round"] = round_no
+                                # >>> ADD THESE LINES <<<
+                                idx = row.get("index")
+                                if idx is not None:
+                                    aggregate[idx] = row
+                                # <<<<<<<<<<<<<<<<<<<<<<<<
                             all_rows_this_batch.extend(rows)
                             for row in rows:
                                 yield self._json_line({"event": "row", **row})

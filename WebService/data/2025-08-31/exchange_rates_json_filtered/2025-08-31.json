@@ -1,0 +1,1397 @@
+{
+  "data": [
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.41036,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 5.29228,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.20699,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "JPY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 207.37213,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 5.17955,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.06174,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 5.13208,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "CHF",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.14784,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JOD",
+      "targetCurrency": "IQD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1844.59816,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "JOD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.70904,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 3.75244,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.8558,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 3.6725,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.75281,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "INR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 88.16745,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 48.48796,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 3.63885,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "ZAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 17.65308,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "TRY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 41.10364,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "USD",
+      "targetCurrency": "IQD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1307.89305,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "JOD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.18895,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.26649,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.22807,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "JPY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 39.18387,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.9787,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "AUD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.40748,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.20062,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "INR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 23.49605,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 12.92172,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "CAD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.36631,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.96973,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "CHF",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.21689,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "SEK",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.52146,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "OMR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.10247,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "KWD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.08144,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "ZAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.70443,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "CNY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.90031,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "TRY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 10.95385,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "DKK",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.70228,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "thb",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 8.60908,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "NZD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.44913,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SAR",
+      "targetCurrency": "IQD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 348.54491,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "JOD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.82851,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.16849,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.38469,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.29129,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.87966,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "INR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 103.02294,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 56.65778,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.25196,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "CHF",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.951,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "ZAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 20.62748,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "TRY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 48.02926,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EUR",
+      "targetCurrency": "IQD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1528.26219,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JPY",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.0068,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JPY",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.02552,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JPY",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00582,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JPY",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.02498,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JPY",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00512,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JPY",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.32977,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "JPY",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.02475,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "JOD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.19307,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.27229,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.02177,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.23303,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "JPY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 40.03672,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "AUD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.41635,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.20499,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "INR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 24.00745,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 13.20297,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "CAD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.37428,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.99084,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "CHF",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.22161,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "SEK",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.57634,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "OMR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.1047,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "KWD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.08321,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "ZAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.80682,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "CNY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.94167,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "TRY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 11.19226,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "DKK",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.73933,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "thb",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 8.79646,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "NZD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.45891,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AED",
+      "targetCurrency": "IQD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 356.13112,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AUD",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.654,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AUD",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.45409,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AUD",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.5597,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AUD",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.40182,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AUD",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.49234,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "AUD",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.3798,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "JOD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.94185,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.32835,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.98455,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.13681,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.87837,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "INR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 117.11723,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 64.40898,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.83366,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "GBP",
+      "targetCurrency": "TRY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 54.60001,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "INR",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.01134,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "INR",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.04256,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "INR",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00971,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "INR",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.04165,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "INR",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00854,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "INR",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.54995,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "INR",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.04127,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EGP",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.02062,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EGP",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.07739,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EGP",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.01765,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EGP",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.07574,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EGP",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.01553,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "EGP",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.07505,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CAD",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.72751,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CAD",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.72994,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CAD",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.62261,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CAD",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.67179,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CAD",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.54768,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CAD",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.6473,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "JOD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.19485,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.03122,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "JPY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 40.40706,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.00925,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "AUD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.4202,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.20688,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "INR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 24.22952,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 13.3251,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "CAD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.37774,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "CHF",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.22366,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "SEK",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.60017,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "OMR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.10567,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "KWD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.08398,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "ZAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.85129,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "CNY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.95963,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "TRY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 11.29579,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "DKK",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.75542,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "thb",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 8.87783,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "QAR",
+      "targetCurrency": "NZD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.46315,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CHF",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.2287,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CHF",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.61063,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CHF",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.05153,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CHF",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.51241,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CHF",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.92498,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CHF",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 4.47106,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "SEK",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.3966,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "OMR",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 9.75917,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "OMR",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 9.55128,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "OMR",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 9.46374,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KWD",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 12.2793,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KWD",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.80049,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KWD",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 12.01773,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KWD",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.46347,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KWD",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 11.90759,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "ZAR",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.05665,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "ZAR",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.21257,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "ZAR",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.20804,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "ZAR",
+      "targetCurrency": "EGP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.74671,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "ZAR",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.20613,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CNY",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.14024,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CNY",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.52623,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CNY",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.12002,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CNY",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.51502,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CNY",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.10557,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "CNY",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.5103,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NZD",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.59335,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NZD",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.22651,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NZD",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.17908,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NZD",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 2.15911,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KRW",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00072,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KRW",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.0027,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KRW",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00062,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KRW",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00054,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "KRW",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00262,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NOK",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.09941,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NOK",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.37303,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NOK",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.08508,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NOK",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.07484,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "NOK",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.36174,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "TRY",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.02433,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "TRY",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.09129,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "TRY",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.02082,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "TRY",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.08935,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "TRY",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.01832,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "TRY",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.08853,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "TRY",
+      "targetCurrency": "ZAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.42948,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "DKK",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.15655,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "DKK",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.58745,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "DKK",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.13398,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "DKK",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.57493,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "DKK",
+      "targetCurrency": "GBP",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.11785,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "DKK",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.56966,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "THB",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.03096,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "THB",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.11616,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "THB",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.11368,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "THB",
+      "targetCurrency": "QAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.11264,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "THB",
+      "targetCurrency": "TRY",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 1.27236,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "IQD",
+      "targetCurrency": "JOD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00054,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "IQD",
+      "targetCurrency": "USD",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00077,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "IQD",
+      "targetCurrency": "SAR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00287,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "IQD",
+      "targetCurrency": "EUR",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00065,
+      "_service_date": "2025-08-31"
+    },
+    {
+      "sourceCurrency": "IQD",
+      "targetCurrency": "AED",
+      "exChangeRateDate": "08/31/2025",
+      "exChangeRateValue": 0.00281,
+      "_service_date": "2025-08-31"
+    }
+  ]
+}

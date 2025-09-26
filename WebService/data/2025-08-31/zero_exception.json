@@ -1,0 +1,142 @@
+[
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "USD",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00072,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "USD",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "P",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00072,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "SAR",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.0027,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "SAR",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "P",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.0027,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "EUR",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00062,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "EUR",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "P",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00062,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "GBP",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00054,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "GBP",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "P",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00054,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "QAR",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00262,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "KRW",
+    "ToCurrency": "QAR",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "P",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00262,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "IQD",
+    "ToCurrency": "USD",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00077,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "IQD",
+    "ToCurrency": "SAR",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00287,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "IQD",
+    "ToCurrency": "EUR",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00065,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  },
+  {
+    "FromCurrency": "IQD",
+    "ToCurrency": "AED",
+    "ValidFrom": "31.08.2025",
+    "ExchangeRateType": "M",
+    "Quotation": "Direct",
+    "original_exchange_rate": 0.00281,
+    "attempted_digits": 2,
+    "would_round_to": 0.0
+  }
+]
