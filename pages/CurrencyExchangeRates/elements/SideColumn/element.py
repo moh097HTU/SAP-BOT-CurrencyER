@@ -1,24 +1,36 @@
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+import time
+
 from core.base import Element
 from services.ui import wait_ui5_idle
 from ..ListToolbar.element import ListToolbar
 from .selectors import CLOSE_COLUMN_BTN_XPATH
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
 
 class SideColumnController(Element):
     def close_if_present(self, timeout: int | None = None) -> bool:
         t = timeout or max(self._timeout, 20)
         listbar = ListToolbar(self.driver)
 
-        # Already at list?
         if listbar.is_at_list(quick=0.8):
             return True
 
-        # Try direct close button
         try:
-            btn = WebDriverWait(self.driver, min(5, t)).until(
+            btn = WebDriverWait(self.driver, min(5, t), ignored_exceptions=(StaleElementReferenceException,)).until(
                 EC.element_to_be_clickable((By.XPATH, CLOSE_COLUMN_BTN_XPATH))
             )
             try:
@@ -26,12 +38,11 @@ class SideColumnController(Element):
             except Exception:
                 pass
             try:
-                btn.click()
+                _retry_stale(lambda: btn.click())
             except Exception:
                 self.js_click(btn)
             wait_ui5_idle(self.driver, timeout=min(6, t))
         except TimeoutException:
-            # DOM sweep
             try:
                 did = self.driver.execute_script(
                     """
@@ -52,7 +63,6 @@ class SideColumnController(Element):
                 did = "err"
             wait_ui5_idle(self.driver, timeout=2)
 
-            # UI5 FCL → OneColumn
             if did != "clicked-dom":
                 try:
                     _ = self.driver.execute_script(

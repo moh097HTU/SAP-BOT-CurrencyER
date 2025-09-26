@@ -1,3 +1,4 @@
+# elements/Footer/element.py
 import time
 from typing import Callable, Dict
 
@@ -6,13 +7,14 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException, StaleElementReferenceException
 
 from core.base import Element, fluent_wait
 from services.ui import wait_ui5_idle
 from ..Dialog.element import DialogWatcher
 from ..Toast.element import ToastReader
 from ..Messages.element import Ui5Messages
+from ..Status.element import StatusProbe
 from .selectors import (
     ACTIVATE_CREATE_BTN_XPATH,
     FORM_CREATE_OR_SAVE_BTN_XPATH,
@@ -23,14 +25,28 @@ from .selectors import (
     COPY_BTN_ID_CONTAINS,
 )
 
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+
 class FooterActions(Element):
     """
     Submit logic with:
       - first attempt click
       - loop clicking with DOM/MessageManager checks
+      - uses StatusProbe for robust success detection
     """
 
-    EXTRA_SETTLE_SEC = 0.2  # was 0.5 — trimmed
+    EXTRA_SETTLE_SEC = 0.2  # trimmed
 
     # ---------- finding & UI5 press helpers ----------
 
@@ -131,7 +147,10 @@ class FooterActions(Element):
         act_id = self._query_activate_id()
         if act_id:
             try:
-                el = self.driver.find_element(By.ID, act_id)
+                def _get_el():
+                    return self.driver.find_element(By.ID, act_id)
+                el = _retry_stale(_get_el)
+
                 try:
                     self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
                 except Exception:
@@ -139,7 +158,7 @@ class FooterActions(Element):
 
                 if self._really_clickable(act_id):
                     try:
-                        el.click()
+                        _retry_stale(lambda: el.click())
                         wait_ui5_idle(self.driver, timeout=min(4, self._timeout))
                         time.sleep(self.EXTRA_SETTLE_SEC)
                         return True
@@ -171,7 +190,7 @@ class FooterActions(Element):
             except Exception:
                 pass
             try:
-                btn.click()
+                _retry_stale(lambda: btn.click())
             except Exception:
                 try:
                     self.driver.execute_script("arguments[0].click();", btn)
@@ -192,6 +211,7 @@ class FooterActions(Element):
         except Exception:
             return False
 
+    # Kept for backward compatibility as a last-resort fallback
     def _activated_dom(self) -> bool:
         try:
             has_edit    = bool(self._query_visible_by_suffix(EDIT_BTN_ID_SUFFIX))
@@ -224,9 +244,9 @@ class FooterActions(Element):
             time.sleep(self.EXTRA_SETTLE_SEC)
 
             try:
-                txt = reader.read_last()
-                if txt:
-                    info["toasts"].append(txt)
+                t = reader.read_last()
+                if t:
+                    info["toasts"].append(t)
             except Exception:
                 pass
 
@@ -242,18 +262,19 @@ class FooterActions(Element):
         at_list: Callable[[], bool],
         close_side: Callable[[], bool],
         max_clicks: int = 5,       # was 10
-        total_timeout: int = 35,   # was 20/60 caps; now 35 default, caller may override
+        total_timeout: int = 35,   # default; caller may override
     ) -> Dict:
-        dlg = DialogWatcher(self.driver)
-        reader = ToastReader(self.driver)
-        msgs = Ui5Messages(self.driver)
+        dlg   = DialogWatcher(self.driver)
+        reader= ToastReader(self.driver)
+        msgs  = Ui5Messages(self.driver)
+        probe = StatusProbe(self.driver)
 
         end = time.time() + max(total_timeout, self._timeout)
         clicks = 0
         toasts = []
         msgs.clear()
 
-        while clicks < max_clicks and time.time() < end:
+        while clicks < max(max_clicks,1) and time.time() < end:
             if dlg.is_open():
                 return {
                     "status": "dialog_open",
@@ -276,7 +297,13 @@ class FooterActions(Element):
                     "popover_text": msgs.popover_text(),
                 }
 
-            if self._activated_dom() or object_header_ready() or at_list():
+            if (
+                probe.success()
+                or probe.is_persisted_object_page()
+                or object_header_ready()
+                or at_list()
+                or self._activated_dom()
+            ):
                 close_side()
                 return {
                     "status": "created",
@@ -299,6 +326,8 @@ class FooterActions(Element):
                     toasts.append(t)
                     lt = (t or "").lower()
                     if any(k in lt for k in ("created", "saved", "activated", "has been created", "successfully")):
+                        if not (probe.success() or probe.is_persisted_object_page()):
+                            wait_ui5_idle(self.driver, timeout=min(2, self._timeout))
                         close_side()
                         return {
                             "status": "created",
@@ -317,10 +346,15 @@ class FooterActions(Element):
         if not at_list():
             close_side()
 
+        created = (
+            probe.success()
+            or probe.is_persisted_object_page()
+            or at_list()
+            or object_header_ready()
+            or self._activated_dom()
+        )
         return {
-            "status": "created"
-            if at_list() or object_header_ready() or self._activated_dom()
-            else "unknown",
+            "status": "created" if created else "unknown",
             "footer_clicks": clicks,
             "intermediate_toasts": toasts,
             "dialog_open": False if not dlg.is_open() else True,

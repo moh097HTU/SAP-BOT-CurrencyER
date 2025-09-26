@@ -22,7 +22,7 @@ def config():
     return {
         # SAP / browser
         "SAP_URL": sap_url,
-        "ROOT_URL": sap_url,  # alias to avoid KeyErrors in callers
+        "ROOT_URL": sap_url,
         "SAP_USERNAME": os.getenv("SAP_USERNAME", ""),
         "SAP_PASSWORD": os.getenv("SAP_PASSWORD", ""),
 
@@ -31,25 +31,42 @@ def config():
         "PAGELOAD_TIMEOUT_SECONDS": _as_int(os.getenv("PAGELOAD_TIMEOUT_SECONDS", "90"), 90),
         "KEEP_BROWSER": _as_bool(os.getenv("KEEP_BROWSER", "true")),
 
-        # Multithreading
+        # Multithreading / pacing
         "NUM_WORKERS": _as_int(os.getenv("NUM_WORKERS", "4"), 4),
         "LOGIN_CONCURRENCY": _as_int(os.getenv("LOGIN_CONCURRENCY", "2"), 2),
-        "WATCHDOG_SECONDS": _as_int(os.getenv("WATCHDOG_SECONDS", "200"), 200),
+        "WATCHDOG_SECONDS": _as_int(os.getenv("WATCHDOG_SECONDS", "2000"), 2000),
         "CHROME_USER_DATA_BASE": os.getenv("CHROME_USER_DATA_BASE", "chrome_profile"),
 
         # Reporting
         "REPORTS_DIR": os.getenv("REPORTS_DIR", "reports"),
+        "DAILY_REPORTS_ENABLED": _as_bool(os.getenv("DAILY_REPORTS_ENABLED", "true")),
+        "NUM_LIVE_TRACKERS": _as_int(os.getenv("NUM_LIVE_TRACKERS", "8"), 8),  # keep last N live trackers
 
         # Email (Outlook via Microsoft Graph)
         "EMAIL_ENABLED": _as_bool(os.getenv("EMAIL_ENABLED", "false")),
         "OUTLOOK_TENANT_ID": os.getenv("OUTLOOK_TENANT_ID", ""),
         "OUTLOOK_CLIENT_ID": os.getenv("OUTLOOK_CLIENT_ID", ""),
         "OUTLOOK_CLIENT_SECRET": os.getenv("OUTLOOK_CLIENT_SECRET", ""),
-        "OUTLOOK_SENDER": os.getenv("OUTLOOK_SENDER", ""),  # user principal name (email)
-        "OUTLOOK_TO": os.getenv("OUTLOOK_TO", ""),          # comma-separated
-        "OUTLOOK_CC": os.getenv("OUTLOOK_CC", ""),          # optional comma-separated
-        # Graph simple attachments must be < ~3 MB each; we’ll skip bigger ones
+        "OUTLOOK_SENDER": os.getenv("OUTLOOK_SENDER", ""),
+        "OUTLOOK_TO": os.getenv("OUTLOOK_TO", ""),
+        "OUTLOOK_CC": os.getenv("OUTLOOK_CC", ""),
         "EMAIL_MAX_ATTACH_MB": _as_int(os.getenv("EMAIL_MAX_ATTACH_MB", "3"), 3),
+
+        # Legacy lock/ retry knobs (kept)
+        "LOCK_RETRY_MAX": _as_int(os.getenv("LOCK_RETRY_MAX", "3"), 3),
+        "LOCK_RETRY_DELAY_SEC": _as_int(os.getenv("LOCK_RETRY_DELAY_SEC", "8"), 8),
+
+        # Tracking
+        "TRACK_DIR": os.getenv("TRACK_DIR", "WebService/TrackDrivers"),
+
+        # Force-all-done loop
+        "FORCE_ALL_DONE_ENABLED": _as_bool(os.getenv("FORCE_ALL_DONE_ENABLED", "true")),
+        "FORCE_ALL_DONE_MAX_ROUNDS": _as_int(os.getenv("FORCE_ALL_DONE_MAX_ROUNDS", "25"), 25),
+        "FORCE_ALL_DONE_MAX_MINUTES": _as_int(os.getenv("FORCE_ALL_DONE_MAX_MINUTES", "60"), 60),
+        "FORCE_ALL_DONE_BASE_SLEEP_SEC": _as_int(os.getenv("FORCE_ALL_DONE_BASE_SLEEP_SEC", "8"), 8),
+
+        # Page commit flow
+        "LOCK_MAX_RETRIES": _as_int(os.getenv("LOCK_MAX_RETRIES", "3"), 3),
     }
 
 # Legacy convenience

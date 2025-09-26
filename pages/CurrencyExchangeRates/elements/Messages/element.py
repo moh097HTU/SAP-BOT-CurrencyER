@@ -67,12 +67,6 @@ class Ui5Messages(Element):
     # ---------- NEW: Message Popover DOM reader ----------
 
     def popover_text(self) -> str:
-        """
-        Returns a single-line string with Message Popover details if visible, else ''.
-        Format: "<title> | <subtitle> | <rich description>"
-
-        We only treat it as 'error' if the popover has an error icon/strip.
-        """
         try:
             txt = self.driver.execute_script(
                 """
@@ -92,7 +86,6 @@ class Ui5Messages(Element):
                   var errStrip = document.querySelector('.sapMMsgStrip.sapMMsgStripError');
                   var isErr = !!(errIcon || errStrip);
 
-                  // grab fields
                   var titleEl = wrap.querySelector('.sapMMsgView .sapMMsgViewTitleText .sapMLnkText');
                   var subEl   = wrap.querySelector('.sapMMsgView .sapMMsgViewSubtitleText');
                   var descEl  = wrap.querySelector('.sapMMsgView .sapMMsgViewDescriptionText');
@@ -108,7 +101,7 @@ class Ui5Messages(Element):
                   if(desc)  parts.push(desc);
                   return parts.join(' | ');
                 }catch(e){ return ''; }
-                """
+            """
             )
             return (txt or "").strip()
         except Exception:

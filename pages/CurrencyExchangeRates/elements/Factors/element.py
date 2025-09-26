@@ -1,15 +1,34 @@
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import StaleElementReferenceException
+import time
+
 from core.base import Element
 from services.ui import wait_ui5_idle
 from .selectors import FROM_FACTOR_BY_LABEL_XPATH, TO_FACTOR_BY_LABEL_XPATH
 
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
 class Factors(Element):
     def _try_set_by_label(self, label_xpath: str, value: str = "1") -> bool:
+        def _find():
+            return self.driver.find_element(By.XPATH, label_xpath)
+
         try:
-            inp = self.driver.find_element(By.XPATH, label_xpath)
+            inp = _retry_stale(_find)
         except Exception:
             return False
+
         try:
             for fn in (
                 lambda: inp.clear(),
@@ -20,11 +39,13 @@ class Factors(Element):
                     "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
                     "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", inp),
             ):
-                try: fn()
-                except Exception: pass
+                try:
+                    _retry_stale(fn)
+                except Exception:
+                    pass
 
-            inp.send_keys(value)
-            try: inp.send_keys(Keys.TAB)
+            _retry_stale(lambda: inp.send_keys(value))
+            try: _retry_stale(lambda: inp.send_keys(Keys.TAB))
             except Exception: pass
             wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
             return True

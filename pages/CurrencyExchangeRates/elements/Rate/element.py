@@ -3,9 +3,24 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import StaleElementReferenceException
+import time
+
 from core.base import Element
 from services.ui import wait_ui5_idle
 from .selectors import EXCH_RATE_INPUT_XPATH, EXCH_RATE_INPUT_FALLBACK_XPATH
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
 
 class ExchangeRateField(Element):
     def _ui_lang_tag(self) -> str:
@@ -50,11 +65,15 @@ class ExchangeRateField(Element):
 
     def _find_input(self):
         try:
-            return self.wait_visible(By.XPATH, EXCH_RATE_INPUT_XPATH)
+            return WebDriverWait(self.driver, max(self._timeout, 10), ignored_exceptions=(StaleElementReferenceException,)).until(
+                lambda d: d.find_element(By.XPATH, EXCH_RATE_INPUT_XPATH)
+            )
         except Exception:
             pass
         try:
-            return self.wait_visible(By.XPATH, EXCH_RATE_INPUT_FALLBACK_XPATH)
+            return WebDriverWait(self.driver, max(self._timeout, 10), ignored_exceptions=(StaleElementReferenceException,)).until(
+                lambda d: d.find_element(By.XPATH, EXCH_RATE_INPUT_FALLBACK_XPATH)
+            )
         except Exception:
             raise RuntimeError("Exchange Rate input not found (primary nor fallback).")
 
@@ -68,7 +87,7 @@ class ExchangeRateField(Element):
                 "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
                 "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", el),
         ):
-            try: js()
+            try: _retry_stale(js)
             except Exception: pass
 
     def commit(self, times: int = 1):
@@ -78,7 +97,7 @@ class ExchangeRateField(Element):
         except Exception:
             pass
         try:
-            inp.click()
+            _retry_stale(lambda: inp.click())
         except Exception:
             self.js_click(inp)
 
@@ -90,10 +109,10 @@ class ExchangeRateField(Element):
             ac.perform()
         except Exception:
             try:
-                inp.send_keys(Keys.ENTER); inp.send_keys(Keys.TAB)
+                _retry_stale(lambda: inp.send_keys(Keys.ENTER))
+                _retry_stale(lambda: inp.send_keys(Keys.TAB))
             except Exception: pass
 
-        # trimmed post-commit idle wait
         wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
 
     def set_via_typing(self, rate_val: str | float | Decimal):
@@ -103,8 +122,8 @@ class ExchangeRateField(Element):
         s = self._format_rate_locale(num)
         inp = self._find_input()
         self._hard_clear(inp)
-        inp.send_keys(s)
-        try: inp.send_keys(Keys.TAB)
+        _retry_stale(lambda: inp.send_keys(s))
+        try: _retry_stale(lambda: inp.send_keys(Keys.TAB))
         except Exception: pass
         wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
 

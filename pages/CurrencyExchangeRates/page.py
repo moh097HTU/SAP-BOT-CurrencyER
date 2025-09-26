@@ -1,11 +1,17 @@
+# pages/CurrencyExchangeRates/page.py
+
 from urllib.parse import urlparse
 from datetime import datetime
 import os
 import time
+import re
 from typing import Optional
 from contextlib import nullcontext
 
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 from core.base import Page, Element
 from services.ui import wait_ui5_idle
@@ -23,6 +29,30 @@ from .elements.Toast.element import ToastReader
 from .elements.Validation.element import ValidationInspector
 from .elements.SideColumn.element import SideColumnController
 from .elements.Header.element import ObjectHeaderVerifier
+
+# For verify-after-set of Quotation
+from .elements.Quotation.selectors import QUOTATION_INNER_INPUT_XPATH
+
+# legacy constant (not used directly; Fields.EXCH_TYPE_INPUT_XPATH is used)
+EXCH_TYPE_INPUT_XPATH = ("//input[contains(@id,"
+                         "'ExchangeRateTypeForEdit::Field-input-inner')]")
+
+# The exact label we want for the Exchange Rate Type field
+TARGET_EXCH_TYPE_LABEL = "M (Standard translation at average rate)"
+
+# --- tiny retry helper (local, non-invasive) ---
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
 
 class CurrencyExchangeRatesPage(Page):
     def __init__(self, driver, root: Optional[str] = None):
@@ -66,6 +96,91 @@ class CurrencyExchangeRatesPage(Page):
             time.sleep(0.12)
         return False
 
+    # --- EXACTLY set Exchange Rate Type to the full label ---
+    def _set_exchange_rate_type_exact(self, fields: Fields, timeout: int = 12) -> dict:
+        """
+        Hard-sets Exchange Rate Type to the exact UI label:
+          M (Standard translation at average rate)
+
+        Returns:
+          {"ok": True, "observed": "<value>"} when confirmed exact,
+          {"ok": False, "observed": "<value>", "why": "<reason>"} otherwise.
+        """
+        el = self._el()
+        t = max(timeout, el._timeout)
+
+        def _get():
+            try:
+                return _retry_stale(lambda: (fields.get_input_value(fields.EXCH_TYPE_INPUT_XPATH) or "").strip())
+            except Exception:
+                return ""
+
+        def _blur(xpath: str):
+            try:
+                self.driver.execute_script(
+                    """
+                    try{
+                      var el=document.evaluate(arguments[0],document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;
+                      if (el){ el.dispatchEvent(new Event('change',{bubbles:true})); el.blur && el.blur(); }
+                    }catch(e){}
+                    """,
+                    xpath
+                )
+            except Exception:
+                pass
+
+        # fast path — already exact
+        cur = _get()
+        if cur == TARGET_EXCH_TYPE_LABEL:
+            return {"ok": True, "observed": cur}
+
+        # 1) Try simple 'M' + Enter + blur
+        try:
+            fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, "M", press_enter=True)
+        except Exception:
+            pass
+        _blur(fields.EXCH_TYPE_INPUT_XPATH)
+        wait_ui5_idle(self.driver, timeout=t)
+        self._wait_not_busy(t)
+        cur = _get()
+        if cur == TARGET_EXCH_TYPE_LABEL:
+            return {"ok": True, "observed": cur}
+
+        # 2) Open value-help and pick exact label
+        try:
+            vhi_xpath = fields.EXCH_TYPE_INPUT_XPATH.replace("-inner", "-vhi")
+            vhi = el.wait_clickable(By.XPATH, vhi_xpath)
+            el.js_click(vhi)
+
+            WebDriverWait(self.driver, t).until(
+                EC.presence_of_element_located((By.XPATH,
+                    "//*[contains(@class,'sapMDialog') or contains(@class,'sapUiMdcValueHelpDialog') or contains(@class,'sapMPopup')]"))
+            )
+            exact_cell = WebDriverWait(self.driver, t).until(
+                EC.element_to_be_clickable((By.XPATH, f"//span[normalize-space(text())='{TARGET_EXCH_TYPE_LABEL}']"))
+            )
+            el.js_click(exact_cell)
+
+            # If value-help has an OK button, click it
+            try:
+                ok_btn = WebDriverWait(self.driver, 2).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[.//bdi[normalize-space()='OK'] or .//span[normalize-space()='OK']]"))
+                )
+                el.js_click(ok_btn)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        _blur(fields.EXCH_TYPE_INPUT_XPATH)
+        wait_ui5_idle(self.driver, timeout=t)
+        self._wait_not_busy(t)
+        cur = _get()
+        if cur == TARGET_EXCH_TYPE_LABEL:
+            return {"ok": True, "observed": cur}
+
+        return {"ok": False, "observed": cur, "why": "could_not_select_exact_label"}
+
     # -------- App navigation (hardened) --------
     def ensure_in_app(self, max_attempts: int = 2, settle_each: int = 8):
         attempts = max(1, max_attempts)
@@ -94,16 +209,12 @@ class CurrencyExchangeRatesPage(Page):
         raise TimeoutException(f"ensure_in_app failed after {attempts} attempts.")
 
     def ensure_in_app_quick(self):
-        """
-        Fast path: if the Create button is clickable within 1s, skip the heavy ensure.
-        """
         if self._app_ready_fast:
             try:
                 if ListToolbar(self.driver).is_at_list(quick=1.0):
                     return
             except Exception:
                 pass
-        # fallback to full ensure
         self.ensure_in_app(max_attempts=3, settle_each=8)
 
     def back_to_list(self):
@@ -150,16 +261,79 @@ class CurrencyExchangeRatesPage(Page):
             time.sleep(0.18)
         return info
 
+    # -------- SOFT guard: ensure type contains 'M' (do not abort) --------
+    def _soft_ensure_exch_type_contains_M(self, fields: Fields, desired_exch_type: str) -> dict:
+        """
+        Ensure the Exchange Rate Type *contains* 'M' BEFORE clicking Create,
+        but do NOT abort the row pre-commit.
+        """
+        def _get():
+            try:
+                return _retry_stale(lambda: (fields.get_input_value(fields.EXCH_TYPE_INPUT_XPATH) or "").strip())
+            except Exception:
+                return ""
+
+        cur = _get()
+        if "m" in cur.lower():
+            return {"ok": True, "observed": cur}
+
+        # corrective retype
+        try:
+            fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, desired_exch_type, press_enter=True)
+        except Exception:
+            pass
+        # explicit blur to fire change bindings
+        try:
+            self.driver.execute_script(
+                """
+                try{
+                  var el=document.evaluate(arguments[0],document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;
+                  if (el){ el.dispatchEvent(new Event('change',{bubbles:true})); el.blur&&el.blur(); }
+                }catch(e){}
+                """,
+                fields.EXCH_TYPE_INPUT_XPATH
+            )
+        except Exception:
+            pass
+
+        wait_ui5_idle(self.driver, timeout=self._el()._timeout)
+        self._wait_not_busy(self._el()._timeout)
+
+        cur2 = _get()
+        return {"ok": ("m" in cur2.lower()), "observed": cur2}
+
+    # ---------------- NEW helpers for your policy ----------------
+    def _detect_lock_info(self, text: str) -> dict | None:
+        if not text:
+            return None
+        low = text.lower()
+        if "locked by user" in low and "table" in low and "tcurr" in low:
+            m = re.search(r"Table\s+(\w+)\s+is\s+locked\s+by\s+user\s+([A-Za-z0-9_]+)", text, re.IGNORECASE)
+            table = None
+            owner = None
+            if m:
+                table = m.group(1)
+                owner = m.group(2)
+            return {"table": table or "TCURR", "owner": owner or ""}
+        return None
+
+    def _is_required_fields_dialog(self, s: str) -> bool:
+        return "fill out all required entry fields" in (s or "").lower()
+
+    def _is_duplicate_exists(self, s: str) -> bool:
+        low = (s or "").lower()
+        return ("exchange rate" in low) and ("already exists in the system" in low)
+
     # -------- Public: create + submit --------
     def create_entry_and_submit(
         self,
         exch_type: str,
         from_ccy: str,
         to_ccy: str,
-        valid_from_mmddyyyy: str,
+        valid_from_ddmmyyyy: str,     # IMPORTANT: pass DD.MM.YYYY
         quotation: str,
         rate_str: str,
-        commit_gate=None,   # only wraps the Create/Activate phase
+        commit_gate=None,
     ) -> dict:
         fields = Fields(self.driver)
         factors = Factors(self.driver)
@@ -183,26 +357,44 @@ class CurrencyExchangeRatesPage(Page):
                 def __exit__(self, *a): return False
             return _C()
 
-        def _close_msg_popover_if_open():
+        def _verify_or_retype(xpath: str, expected: str) -> None:
+            if expected is None:
+                return
+            got = (fields.get_input_value(xpath) or "").strip()
+            if got.lower() != (expected or "").strip().lower():
+                fields.set_plain_input(xpath, expected, press_enter=True)
+                _ = fields.get_input_value(xpath)
+
+        def _verify_quotation(expected: str) -> None:
             try:
-                self.driver.execute_script(
-                    """
-                    try{
-                    var b = document.querySelector('.sapMMsgPopoverCloseBtn');
-                    if (b && b.offsetParent) { b.click(); return true; }
-                    return false;
-                    }catch(e){ return false; }
-                    """
-                )
+                cur = _retry_stale(lambda: (self.driver.find_element(By.XPATH, QUOTATION_INNER_INPUT_XPATH).get_attribute("value") or "").strip())
             except Exception:
-                pass
+                cur = ""
+            if cur.lower() != (expected or "").strip().lower():
+                quote.set_value(expected)
 
         def _fill_all_fields(prefer_ui5_for_rate: bool = False):
+            # 1) Exchange Rate Type
             fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, exch_type, press_enter=True)
+            _verify_or_retype(fields.EXCH_TYPE_INPUT_XPATH, exch_type)
+
+            # 2) From Currency
             fields.set_plain_input(fields.FROM_CCY_INPUT_XPATH, from_ccy, press_enter=True)
+            _verify_or_retype(fields.FROM_CCY_INPUT_XPATH, from_ccy)
+
+            # 3) To Currency
             fields.set_plain_input(fields.TO_CCY_INPUT_XPATH, to_ccy, press_enter=True)
-            fields.set_plain_input(fields.VALID_FROM_INPUT_XPATH, valid_from_mmddyyyy, press_enter=True)
+            _verify_or_retype(fields.TO_CCY_INPUT_XPATH, to_ccy)
+
+            # 4) Valid From — **DD.MM.YYYY** (typed EXACTLY as provided)
+            fields.set_plain_input(fields.VALID_FROM_INPUT_XPATH, valid_from_ddmmyyyy, press_enter=True)
+            _verify_or_retype(fields.VALID_FROM_INPUT_XPATH, valid_from_ddmmyyyy)
+
+            # 5) Quotation
             quote.set_value(quotation)
+            _verify_quotation(quotation)
+
+            # 6) Factors and Rate
             factors.try_set_from("1")
             factors.try_set_to("1")
             if prefer_ui5_for_rate:
@@ -230,7 +422,9 @@ class CurrencyExchangeRatesPage(Page):
             return any(k in blob for k in keys)
 
         def _commit_flow_under_gate() -> dict:
+            # same provider
             gate_ctx = commit_gate() if callable(commit_gate) else _noop_gate_ctx()
+            # Hold the gate for the ENTIRE commit attempt to prevent overlapping commits.
             with gate_ctx:
                 first_phase = footer.click_create(clicks=1)
 
@@ -251,8 +445,8 @@ class CurrencyExchangeRatesPage(Page):
                     object_header_ready=lambda: self._wait_object_header_ready(timeout=4),
                     at_list=lambda: listbar.is_at_list(quick=0.8),
                     close_side=lambda: sidecol.close_if_present(timeout=max(8, el._timeout)),
-                    total_timeout=max(35, el._timeout),  # tightened cap
-                    max_clicks=5,                         # tightened cap
+                    total_timeout=max(35, el._timeout),
+                    max_clicks=5,
                 )
                 if loop_res.get("status") in ("created", "dialog_open", "activation_error"):
                     return loop_res
@@ -301,45 +495,85 @@ class CurrencyExchangeRatesPage(Page):
         # 1) Open form
         self._click_list_create(timeout=el._timeout)
 
-        # 2) Fill fields
+        # 2) Fill fields (DD.MM.YYYY is passed straight through)
         _fill_all_fields(prefer_ui5_for_rate=False)
 
+        # 2.5) SOFT GUARD: ensure Exchange Rate Type *contains* "M"
+        m_check = self._soft_ensure_exch_type_contains_M(fields, exch_type)
+        # (we still proceed; just annotate later if needed)
+
         # 3) Pre-submit validation (client)
-        err = validate.collect()
+        err = ValidationInspector(self.driver).collect()
         if err and "greater than zero" in (err or "").lower():
-            factors.try_set_from("1")
-            factors.try_set_to("1")
-            rate.set_via_ui5(rate_str)
-            rate.commit(times=1)
-            err = validate.collect()
+            Factors(self.driver).try_set_from("1")
+            Factors(self.driver).try_set_to("1")
+            ExchangeRateField(self.driver).set_via_ui5(rate_str)
+            ExchangeRateField(self.driver).commit(times=1)
+            err = ValidationInspector(self.driver).collect()
 
-        # 4) COMMIT under narrow gate
+        # ---------------- Commit with POLICY REMAP ----------------
+        # NOTE: The old code retried locks; your policy maps TCURR locks to PENDING directly.
+
+        # 4) COMMIT attempt
         res = _commit_flow_under_gate()
+        status = (res.get("status") or "").lower()
 
-        if res.get("status") == "dialog_open":
-            dlg_text = (res.get("dialog_text") or "").lower()
-            if "fill out all required entry fields" in dlg_text and "exchange rate type" in dlg_text:
-                _close_msg_popover_if_open()
-                _fill_all_fields(prefer_ui5_for_rate=True)
-                res2 = _commit_flow_under_gate()
-                if res2.get("status") == "created":
-                    return res2
-                res2.setdefault("dialog_text", res.get("dialog_text", ""))
-                res2["status"] = "validation_error"
-                res2["reentered"] = True
-                return res2
+        # 5) Post-commit note if M was missing pre-commit
+        if not m_check.get("ok", True):
+            res.setdefault("notes", {})
+            res["notes"]["exch_type_missing_M_precommit"] = True
+            res["notes"]["observed_exch_type"] = m_check.get("observed", "")
+
+        # --- Build a combined message blob for policy checks
+        msgs = res.get("messages", []) or []
+        joined_msgs = " | ".join(f"{(m.get('message') or '')} {m.get('description') or ''}".strip() for m in msgs)
+        joined_all = " | ".join([res.get("dialog_text") or "", joined_msgs]).strip()
+
+        # === POLICY REMAP ===
+        # TCURR lock anywhere → Pending (not Locked)
+        lock = self._detect_lock_info(joined_all)
+        if lock:
+            try: DialogWatcher(self.driver).close(timeout=1.0)
+            except Exception: pass
+            SideColumnController(self.driver).close_if_present(timeout=min(12, max(10, el._timeout)))
+            try: self.back_to_list()
+            except Exception: pass
+            return {
+                "status": "pending",
+                "dialog_open": False,
+                "dialog_text": res.get("dialog_text", ""),
+                "notes": {
+                    "lock_table": lock.get("table", "TCURR"),
+                    "lock_owner": lock.get("owner", ""),
+                    "reason": "table_lock_tcurr"
+                }
+            }
+
+        # Duplicate exists → Skipped
+        if self._is_duplicate_exists(joined_all):
+            try: DialogWatcher(self.driver).close(timeout=1.0)
+            except Exception: pass
+            SideColumnController(self.driver).close_if_present(timeout=min(12, max(10, el._timeout)))
+            try: self.back_to_list()
+            except Exception: pass
+            return {
+                "status": "skipped",
+                "dialog_open": False,
+                "dialog_text": res.get("dialog_text", ""),
+                "notes": {"already_existed": True}
+            }
+
+        # Created passes through as Created (Done by the worker/runner mapping)
+        if status == "created":
             return res
 
-        if res.get("status") == "activation_error" and _looks_like_required_fields_issue(res.get("messages", [])):
-            _close_msg_popover_if_open()
-            _fill_all_fields(prefer_ui5_for_rate=True)
-            res2 = _commit_flow_under_gate()
-            if res2.get("status") in ("created", "dialog_open"):
-                return res2
-            res2["status"] = "validation_error"
-            res2["reentered"] = True
-            return res2
+        # Activation error: keep as 'error' (visible) unless policy conditions matched above
+        # Unknown: your policy wants re-queue → map to 'pending'
+        if status == "unknown":
+            res["status"] = "pending"
+            return res
 
+        # anything else (dialog_open without recognized messages etc.) → return as-is
         return res
 
     def create_rate(
@@ -353,16 +587,22 @@ class CurrencyExchangeRatesPage(Page):
         to_cy: str | None = None,
         commit_gate=None,
     ) -> dict:
+        """
+        NOTE: pass date in **DD.MM.YYYY**. We DO NOT convert here.
+        services.schemas.ExchangeRateItem already normalizes to DD.MM.YYYY.
+        """
         if to_ccy is None and to_cy is not None:
             to_ccy = to_cy
         if to_ccy is None:
             raise TypeError("create_rate() missing required argument: 'to_ccy'")
 
+        valid_from_ddmmyyyy = valid_from_mmddyyyy
+
         return self.create_entry_and_submit(
             exch_type=exch_type,
             from_ccy=from_ccy,
             to_ccy=to_ccy,
-            valid_from_mmddyyyy=valid_from_mmddyyyy,
+            valid_from_ddmmyyyy=valid_from_ddmmyyyy,   # typed as-is
             quotation=quotation,
             rate_str=str(rate_value),
             commit_gate=commit_gate,

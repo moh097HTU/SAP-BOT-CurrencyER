@@ -11,6 +11,10 @@ _SEM = threading.Semaphore(_COMMIT_CONCURRENCY)
 
 @contextmanager
 def commit_gate():
+    """
+    Narrow critical section for the exact click(s) that commit/activate
+    the object. Everything else (typing, navigation) runs concurrently.
+    """
     _SEM.acquire()
     try:
         yield

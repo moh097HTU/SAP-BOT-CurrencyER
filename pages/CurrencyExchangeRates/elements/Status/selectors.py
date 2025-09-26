@@ -28,7 +28,7 @@ TREND_SECTION_ANCHOR_XPATH = (
     "//a[contains(normalize-space(.), 'Trend') and contains(@id,'Section-anchor')]"
 )
 
-# Object header root for reading aria-label (already used elsewhere)
+# Object header root for reading aria-label
 OBJECT_HEADER_CONTENT_XPATH = (
     "//*[substring(@id,string-length(@id)-string-length('--objectPage-OPHeaderContent')+1)="
     "'--objectPage-OPHeaderContent']"

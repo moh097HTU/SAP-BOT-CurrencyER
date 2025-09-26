@@ -101,7 +101,7 @@ class ShellSearch(Element):
             inp.send_keys(Keys.ENTER)
 
         # Wait for suggestions table to show up
-        wait = WebDriverWait(self.driver, max(self._timeout, 25))
+        wait = WebDriverWait(self.driver, max(self._timeout, 10))
         try:
             wait.until(EC.presence_of_element_located((By.XPATH, SUGGEST_TABLE_XPATH)))
         except TimeoutException:
@@ -109,7 +109,7 @@ class ShellSearch(Element):
             self.driver.execute_script(
                 "location.href = location.origin + '/ui?sap-ushell-config=lean#Currency-maintainExchangeRates';"
             )
-            wait_ui5_idle(self.driver, timeout=max(self._timeout, 25))
+            wait_ui5_idle(self.driver, timeout=max(self._timeout, 10))
             return self
 
         # Click the suggestion row (exact text), else fallback to contains()
@@ -120,7 +120,7 @@ class ShellSearch(Element):
                     row.click()
                 except Exception:
                     self.js_click(row)
-                wait_ui5_idle(self.driver, timeout=max(self._timeout, 25))
+                wait_ui5_idle(self.driver, timeout=max(self._timeout, 10))
                 return self
             except TimeoutException:
                 continue
@@ -129,5 +129,5 @@ class ShellSearch(Element):
         self.driver.execute_script(
             "location.href = location.origin + '/ui?sap-ushell-config=lean#Currency-maintainExchangeRates';"
         )
-        wait_ui5_idle(self.driver, timeout=max(self._timeout, 25))
+        wait_ui5_idle(self.driver, timeout=max(self._timeout, 10))
         return self

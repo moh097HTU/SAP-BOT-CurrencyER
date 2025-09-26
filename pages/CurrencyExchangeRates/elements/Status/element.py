@@ -13,13 +13,6 @@ from .selectors import (
 )
 
 class StatusProbe(Element):
-    """Reads robust 'done' signals:
-       - IsActiveEntity from bound context (server truth)
-       - Buttons flip (Edit/Delete/Copy appear, Discard Draft disappears)
-       - Sections appear (Change Log / Trend)
-       - Header aria-label turns concrete (not 'New …')
-    """
-
     def _exists(self, xp: str, t: float = 0.7) -> bool:
         try:
             WebDriverWait(self.driver, t).until(EC.presence_of_element_located((By.XPATH, xp)))
@@ -28,7 +21,6 @@ class StatusProbe(Element):
             return False
 
     def is_active_entity(self):
-        """True/False if found, or None when not determinable."""
         try:
             res = self.driver.execute_script(
                 """
@@ -36,7 +28,6 @@ class StatusProbe(Element):
                   var core=sap && sap.ui && sap.ui.getCore && sap.ui.getCore();
                   if(!core) return {ok:false, why:'no-core'};
                   var els = core && core.mElements ? Object.values(core.mElements) : [];
-                  // Prefer ObjectPageLayout
                   for (var i=0;i<els.length;i++){
                     var c=els[i];
                     try{
@@ -52,7 +43,6 @@ class StatusProbe(Element):
                       }
                     }catch(e){}
                   }
-                  // Fallback: any control with IsActiveEntity
                   for (var j=0;j<els.length;j++){
                     var c2=els[j];
                     try{
@@ -96,14 +86,61 @@ class StatusProbe(Element):
         except Exception:
             return ""
 
+    def object_header_text(self) -> str:
+        try:
+            return self.driver.execute_script("""
+                try{
+                  var el = document.querySelector("[id*='ObjectPageDynamicHeaderTitle-inner']");
+                  return (el && (el.innerText||el.textContent)||'').trim();
+                }catch(e){return '';}
+            """) or ""
+        except Exception:
+            return ""
+
+    def is_create_mode(self) -> bool:
+        try:
+            return bool(self.driver.execute_script("""
+                try{
+                  function vis(el){ if(!el) return false; var cs=getComputedStyle(el);
+                    if(cs.display==='none'||cs.visibility==='hidden') return false;
+                    var r=el.getBoundingClientRect(); return r.width>0 && r.height>0;
+                  }
+                  var nodes=[...document.querySelectorAll('button,bdi')];
+                  return nodes.some(n=>{
+                    var t=(n.innerText||n.textContent||'').trim();
+                    if(!/\bCreate\b/i.test(t)) return false;
+                    var b=n.tagName==='BDI' ? n.closest('button') : n;
+                    return vis(b);
+                  });
+                }catch(e){return false;}
+            """))
+        except Exception:
+            return False
+
+    def is_draft_url(self) -> bool:
+        try:
+            return bool(self.driver.execute_script("return location.href.includes('IsActiveEntity=false');"))
+        except Exception:
+            return False
+
+    def is_persisted_object_page(self) -> bool:
+        title = self.object_header_text()
+        if not title:
+            return False
+        if self.is_create_mode():
+            return False
+        if not self.is_draft_url():
+            return True
+        btns = self.buttons_state()
+        return (btns["has_edit"] and not btns["has_discard_draft"])
+
     def success(self) -> bool:
-        """Combine all cues into a robust success predicate."""
         active = self.is_active_entity()
         if active is True:
             return True
 
         btns = self.buttons_state()
-        if btns["has_edit"] and not btns["has_discard_draft"]:
+        if btns["has_edit"] and not btns["has_discard_draft"]:# Discard Draft disappeared
             return True
 
         secs = self.sections_present()
@@ -112,6 +149,9 @@ class StatusProbe(Element):
 
         aria = self.header_aria_label()
         if aria and "Header area" in aria and "New" not in aria:
+            return True
+
+        if self.is_persisted_object_page():
             return True
 
         return False
