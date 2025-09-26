@@ -9,3 +9,5 @@ chrome_profile/
 .DS_Store
 *.log
 *.png
+reports/
+TrackDrivers/

@@ -21,3 +21,7 @@ EDIT_BTN_ID_SUFFIX     = "--edit"
 DELETE_BTN_ID_SUFFIX   = "--delete"
 DISCARD_BTN_ID_SUFFIX  = "--discard"
 COPY_BTN_ID_CONTAINS   = "::Copy"
+
+MESSAGE_BTN_SUFFIX = "--showMessages"
+MSG_POPOVER_CLOSE_BTN_XP = "//button[contains(@class,'sapMMsgPopoverCloseBtn')]"
+MSG_ITEMS_XP = "//li[contains(@class,'sapMMsgViewItem')]//span[contains(@id,'-titleText')]"

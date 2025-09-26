@@ -28,11 +28,15 @@ def ensure_driver_binary_ready() -> str:
     global _DRIVER_PATH_CACHE
     if _DRIVER_PATH_CACHE:
         return _DRIVER_PATH_CACHE
-    with _DRIVER_INIT_LOCK:
+    with _DRIVER_PATH_CACHE_LOCK():
         if _DRIVER_PATH_CACHE:
             return _DRIVER_PATH_CACHE
         _DRIVER_PATH_CACHE = ChromeDriverManager().install()
         return _DRIVER_PATH_CACHE
+
+def _DRIVER_PATH_CACHE_LOCK():
+    # backward-compatible simple lock factory (kept separate in case of future refactors)
+    return _DRIVER_INIT_LOCK
 
 def _base_profile_dir() -> Path:
     return Path(os.getenv("CHROME_USER_DATA_BASE", "chrome_profile")).resolve()
@@ -46,9 +50,15 @@ def list_profile_dirs_used() -> list[str]:
         return list(_PROFILE_DIRS_USED)
 
 def _per_thread_profile_dir() -> str:
+    """
+    Use a process-unique + thread-unique Chrome user-data directory to avoid
+    cross-process collisions on profile locks. Format: w-<pid>-<thread_id>
+    """
     base = _base_profile_dir()
     base.mkdir(parents=True, exist_ok=True)
-    d = base / f"w-{threading.get_ident()}"
+    pid = os.getpid()
+    tid = threading.get_ident()
+    d = base / f"w-{pid}-{tid}"
     d.mkdir(parents=True, exist_ok=True)
     p = str(d.resolve())
     _register_profile_dir(p)
@@ -122,6 +132,7 @@ def get_driver(headless: bool = True) -> webdriver.Chrome:
         except Exception:
             pass
 
+    # Hide webdriver flag (minor hardening)
     try:
         driver.execute_cdp_cmd(
             "Page.addScriptToEvaluateOnNewDocument",
@@ -136,6 +147,117 @@ def get_driver(headless: bool = True) -> webdriver.Chrome:
         pass
 
     return driver
+
+# ---------- OS-level cleanup (best-effort) ----------
+
+def _safe_str(s) -> str:
+    try:
+        return str(s or "")
+    except Exception:
+        return ""
+
+def _cmdline_has_userdata_under_base(cmdline: list[str], base: Path) -> bool:
+    b = str(base)
+    for arg in cmdline or []:
+        a = _safe_str(arg)
+        if "--user-data-dir=" in a:
+            try:
+                path = a.split("=", 1)[1]
+            except Exception:
+                path = ""
+            if path and Path(path).resolve().as_posix().startswith(base.as_posix()):
+                return True
+        # Some shells may separate option and value as two args
+    for i, a in enumerate(cmdline or []):
+        if a == "--user-data-dir" and i + 1 < len(cmdline):
+            path = _safe_str(cmdline[i + 1])
+            if path and Path(path).resolve().as_posix().startswith(base.as_posix()):
+                return True
+        # Generic containment check as a fallback
+        if b in _safe_str(a):
+            return True
+    return False
+
+def _should_kill(proc, base: Path) -> bool:
+    """
+    Decide whether to kill this process based on its name/cmdline and profile base.
+    We only target Chrome/Chromium and chromedriver that reference our profile base.
+    """
+    try:
+        name = _safe_str(proc.info.get("name")).lower()
+        cmd  = proc.info.get("cmdline") or []
+    except Exception:
+        return False
+
+    chrome_names = {"chrome", "chrome.exe", "google-chrome", "chromium", "chromium-browser"}
+    driver_names = {"chromedriver", "chromedriver.exe"}
+
+    if name in chrome_names and _cmdline_has_userdata_under_base(cmd, base):
+        return True
+
+    if name in driver_names:
+        # If chromedriver itself mentions our base, kill it.
+        if _cmdline_has_userdata_under_base(cmd, base):
+            return True
+        # Else, if any child Chrome matches our base, kill chromedriver too.
+        try:
+            for child in proc.children(recursive=True):
+                try:
+                    cname = _safe_str(child.name()).lower()
+                    ccmd  = child.cmdline() or []
+                    if cname in chrome_names and _cmdline_has_userdata_under_base(ccmd, base):
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    return False
+
+def kill_strays() -> dict:
+    """
+    Best-effort: kill leftover chrome/chromedriver processes that are bound to
+    our CHROME_USER_DATA_BASE tree (i.e., launched by us). Requires psutil; otherwise no-op.
+    Returns a dict with 'ok', 'killed' (list of PIDs), and optional 'reason'.
+    """
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return {"ok": False, "reason": "psutil_missing"}
+
+    base = _base_profile_dir()
+    killed: list[int] = []
+    errs: list[dict] = []
+
+    try:
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                if _should_kill(proc, base):
+                    # Try terminate first; escalate to kill if needed
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    try:
+                        proc.wait(timeout=1.5)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception as e:
+                            errs.append({"pid": proc.pid, "err": f"kill_failed:{type(e).__name__}"})
+                            continue
+                    killed.append(proc.pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            except Exception as e:
+                errs.append({"pid": getattr(proc, "pid", -1), "err": f"{type(e).__name__}"})
+                continue
+    except Exception as e:
+        return {"ok": False, "reason": f"iter_failed:{type(e).__name__}"}
+
+    return {"ok": True, "killed": killed, "errors": errs}
+
+# ---------- filesystem cleanup ----------
 
 def _on_rm_error(func, path, exc_info):
     try:
@@ -162,6 +284,17 @@ def _rmtree_force(p: Path, retries: int = 3, delay: float = 0.25):
         pass
 
 def cleanup_profiles(also_base: bool = True) -> dict:
+    """
+    Remove all per-worker profile dirs we created this run.
+    Before deleting, best-effort kill any chrome/chromedriver processes that
+    still reference our profile base (prevents 'in use' errors).
+    """
+    try:
+        _ = kill_strays()
+    except Exception:
+        # Never let cleanup crash the runner
+        pass
+
     deleted = []
     errors = []
     with _PROFILE_SET_LOCK:
@@ -173,6 +306,7 @@ def cleanup_profiles(also_base: bool = True) -> dict:
             deleted.append(d)
         except Exception as e:
             errors.append({"dir": d, "error": f"{type(e).__name__}: {e}"})
+
     base = _base_profile_dir()
     if also_base:
         try:
@@ -180,5 +314,6 @@ def cleanup_profiles(also_base: bool = True) -> dict:
                 _rmtree_force(base)
         except Exception:
             pass
+
     gc.collect()
     return {"deleted": deleted, "errors": errors}

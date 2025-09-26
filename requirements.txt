@@ -3,5 +3,6 @@ webdriver-manager>=4.0.2
 python-dotenv>=1.0.1
 fastapi>=0.111
 uvicorn[standard]>=0.30
-msal
-requests
+msal>=1.28
+requests>=2.32
+psutil>=5.9

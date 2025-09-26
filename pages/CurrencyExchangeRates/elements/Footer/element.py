@@ -23,6 +23,9 @@ from .selectors import (
     EDIT_BTN_ID_SUFFIX,
     DISCARD_BTN_ID_SUFFIX,
     COPY_BTN_ID_CONTAINS,
+    MESSAGE_BTN_SUFFIX,
+    MSG_POPOVER_CLOSE_BTN_XP,
+    MSG_ITEMS_XP, 
 )
 
 def _retry_stale(fn, tries=3, pause=0.12):
@@ -47,9 +50,76 @@ class FooterActions(Element):
     """
 
     EXTRA_SETTLE_SEC = 0.2  # trimmed
+    def open_and_read_messages(self, timeout: int = 8) -> list[str]:
+        """
+        Clicks the footer 'Messages' button to open the Message Popover (if badge > 0),
+        returns a list of visible message titles (strings). Leaves the popover open.
+        """
+        # Find the footer messages button
+        try:
+            msg_btn_id = self._query_visible_by_suffix(MESSAGE_BTN_SUFFIX)
+        except Exception:
+            msg_btn_id = None
+
+        if not msg_btn_id:
+            return []
+
+        # Read the badge text quickly (optional; if not found, still click)
+        badge_text = ""
+        try:
+            badge_bdi = self.driver.find_element(By.ID, f"{msg_btn_id}-BDI-content")
+            badge_text = (badge_bdi.text or "").strip()
+        except Exception:
+            pass
+
+        # If nothing to show (badge empty/0), bail early
+        if badge_text and badge_text.isdigit() and int(badge_text) == 0:
+            return []
+
+        # Open the popover (toggle)
+        try:
+            btn = WebDriverWait(self.driver, 3, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.ID, msg_btn_id))
+            )
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+            except Exception:
+                pass
+            try:
+                btn.click()
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", btn)
+                except Exception:
+                    pass
+        except Exception:
+            return []
+
+        # Wait for message items to render
+        try:
+            WebDriverWait(self.driver, timeout, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.presence_of_element_located((By.XPATH, MSG_ITEMS_XP))
+            )
+        except TimeoutException:
+            return []
+
+        # Collect item titles
+        texts = []
+        try:
+            items = self.driver.find_elements(By.XPATH, MSG_ITEMS_XP)
+            for it in items:
+                try:
+                    txt = (it.text or "").strip()
+                    if txt:
+                        texts.append(txt)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return texts
+
 
     # ---------- finding & UI5 press helpers ----------
-
     def _query_visible_by_suffix(self, suffix: str) -> str | None:
         try:
             return self.driver.execute_script(
@@ -255,6 +325,143 @@ class FooterActions(Element):
                 break
 
         return info
+
+    def close_message_popover_if_open(self, timeout: int = 3) -> bool:
+        """
+        Closes the Message Popover if it is open. Returns True if we believe it closed.
+        """
+        # Prefer the close button in the popover header
+        try:
+            close_btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.XPATH, MSG_POPOVER_CLOSE_BTN_XP))
+            )
+            try:
+                close_btn.click()
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", close_btn)
+                except Exception:
+                    pass
+            # Wait until close button disappears
+            WebDriverWait(self.driver, timeout, ignored_exceptions=(StaleElementReferenceException,)).until_not(
+                EC.presence_of_element_located((By.XPATH, MSG_POPOVER_CLOSE_BTN_XP))
+            )
+            return True
+        except Exception:
+            # Fallback: toggle the Messages button to close
+            try:
+                msg_btn_id = self._query_visible_by_suffix(MESSAGE_BTN_SUFFIX)
+                if msg_btn_id:
+                    btn = self.driver.find_element(By.ID, msg_btn_id)
+                    try:
+                        btn.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", btn)
+                    return True
+            except Exception:
+                pass
+            return False
+
+    def discard_draft(self, timeout: int = 10) -> bool:
+        """
+        Clicks footer 'Discard Draft', then confirms 'Discard' in the confirmation popover.
+        Returns True if confirmation popover disappears.
+        """
+        import time
+
+        # 1) Click footer 'Discard Draft'
+        disc_id = None
+        try:
+            disc_id = self._query_visible_by_suffix("--discard")
+        except Exception:
+            pass
+
+        if disc_id:
+            try:
+                el = WebDriverWait(self.driver, 2, ignored_exceptions=(StaleElementReferenceException,)).until(
+                    EC.element_to_be_clickable((By.ID, disc_id))
+                )
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                except Exception:
+                    pass
+                try:
+                    el.click()
+                except Exception:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", el)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # UI5 press fallback
+            _ = self._ui5_press_by_id(disc_id)
+
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+        time.sleep(self.EXTRA_SETTLE_SEC)
+
+        # 2) Confirm 'Discard' in popover
+        CONFIRM_SUFFIX = "--DiscardDraftConfirmButton"
+
+        def _click_confirm() -> bool:
+            # by ID suffix
+            try:
+                cid = self._query_visible_by_suffix(CONFIRM_SUFFIX)
+            except Exception:
+                cid = None
+
+            if cid:
+                try:
+                    btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                        EC.element_to_be_clickable((By.ID, cid))
+                    )
+                    try:
+                        self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                    except Exception:
+                        pass
+                    try:
+                        btn.click()
+                    except Exception:
+                        try:
+                            self.driver.execute_script("arguments[0].click();", btn)
+                        except Exception:
+                            pass
+                    return True
+                except Exception:
+                    pass
+
+            # by visible text
+            try:
+                xp = ("//bdi[normalize-space()='Discard']/ancestor::button[1]"
+                    " | //button[.//bdi[normalize-space()='Discard']]")
+                btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                    EC.element_to_be_clickable((By.XPATH, xp))
+                )
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                except Exception:
+                    pass
+                try:
+                    btn.click()
+                except Exception:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", btn)
+                    except Exception:
+                        pass
+                return True
+            except Exception:
+                return False
+
+        clicked = _click_confirm()
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+        time.sleep(self.EXTRA_SETTLE_SEC)
+
+        # If confirm button no longer visible, assume success
+        try:
+            still = self._query_visible_by_suffix(CONFIRM_SUFFIX)
+        except Exception:
+            still = None
+        return bool(clicked and not still)
 
     def ensure_created_by_loop_clicking(
         self,

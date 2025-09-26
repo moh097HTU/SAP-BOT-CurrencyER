@@ -83,6 +83,11 @@ def worker_process(
       - Done     → created (success)
       - Skipped  → duplicate existed (policy)
       - Error    → terminal error for this batch
+
+    **IMPORTANT CHANGE**
+    If a tracker file exists, we will ONLY process rows still marked Pending.
+    If there are no Pending rows in the tracker, we return immediately with no work.
+    We DO NOT fall back to the original shard in that case.
     """
     results: List[Dict[str, Any]] = []
     drv = None
@@ -92,11 +97,14 @@ def worker_process(
     MAX_OPEN_RETRIES = 3
     NONFATAL_RETRIES = 2  # soft retries inside SAME driver for flaky DOM
 
-    # Build the pending queue from tracking (preferred) or from shard
+    # ---- Build the todo queue ----
+    # If the tracker file exists, ALWAYS respect it and only take Pending rows.
+    # If it doesn't exist (should not happen after init), fall back to the shard (first run).
     if track_file_path and track_file_path.exists():
         pending_list = iter_pending_items(track_file_path)
+        # CRITICAL: do not "re-expand" the shard when nothing is pending; just exit with no work.
         if not pending_list:
-            pending_list = shard[:]  # nothing pending, but keep structure
+            return {"interrupted": False, "results": []}
     else:
         pending_list = shard[:]
 
@@ -135,7 +143,6 @@ def worker_process(
         """
         # normalize & keep dialog_text in results
         if not row.get("dialog_text"):
-            # sometimes the page may put the message in 'error'
             if row.get("error"):
                 row["dialog_text"] = row["error"]
         results.append(row)
@@ -207,8 +214,10 @@ def worker_process(
                     else:
                         results.append({**row, "status": "error"})
                         if track_file_path:
-                            mark_item_status(track_file_path, idx, "Error",
-                                             {"error": row.get("error") | row.get("dialog_text") if isinstance(row.get("error"), str) else (row.get("dialog_text") or "")})
+                            mark_item_status(
+                                track_file_path, idx, "Error",
+                                {"error": row.get("error") if isinstance(row.get("error"), str) else (row.get("dialog_text") or "")}
+                            )
                     time.sleep(0.2)
                     break
 

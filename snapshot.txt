@@ -2938,7 +2938,7 @@ class CurrencyExchangeRatesPage(Page):
             fields.set_plain_input(fields.TO_CCY_INPUT_XPATH, to_ccy, press_enter=True)
             _verify_or_retype(fields.TO_CCY_INPUT_XPATH, to_ccy)
 
-            # 4) Valid From — **DD.MM.YYYY** (typed EXACTLY as provided)
+            # 4) Valid From — **DD.MM.YYYY**
             fields.set_plain_input(fields.VALID_FROM_INPUT_XPATH, valid_from_ddmmyyyy, press_enter=True)
             _verify_or_retype(fields.VALID_FROM_INPUT_XPATH, valid_from_ddmmyyyy)
 
@@ -2974,9 +2974,7 @@ class CurrencyExchangeRatesPage(Page):
             return any(k in blob for k in keys)
 
         def _commit_flow_under_gate() -> dict:
-            # same provider
             gate_ctx = commit_gate() if callable(commit_gate) else _noop_gate_ctx()
-            # Hold the gate for the ENTIRE commit attempt to prevent overlapping commits.
             with gate_ctx:
                 first_phase = footer.click_create(clicks=1)
 
@@ -3052,7 +3050,6 @@ class CurrencyExchangeRatesPage(Page):
 
         # 2.5) SOFT GUARD: ensure Exchange Rate Type *contains* "M"
         m_check = self._soft_ensure_exch_type_contains_M(fields, exch_type)
-        # (we still proceed; just annotate later if needed)
 
         # 3) Pre-submit validation (client)
         err = ValidationInspector(self.driver).collect()
@@ -3062,9 +3059,6 @@ class CurrencyExchangeRatesPage(Page):
             ExchangeRateField(self.driver).set_via_ui5(rate_str)
             ExchangeRateField(self.driver).commit(times=1)
             err = ValidationInspector(self.driver).collect()
-
-        # ---------------- Commit with POLICY REMAP ----------------
-        # NOTE: The old code retried locks; your policy maps TCURR locks to PENDING directly.
 
         # 4) COMMIT attempt
         res = _commit_flow_under_gate()
@@ -3077,9 +3071,24 @@ class CurrencyExchangeRatesPage(Page):
             res["notes"]["observed_exch_type"] = m_check.get("observed", "")
 
         # --- Build a combined message blob for policy checks
-        msgs = res.get("messages", []) or []
-        joined_msgs = " | ".join(f"{(m.get('message') or '')} {m.get('description') or ''}".strip() for m in msgs)
+        msgs_from_res = res.get("messages", []) or []
+        joined_msgs = " | ".join(f"{(m.get('message') or '')} {m.get('description') or ''}".strip() for m in msgs_from_res)
         joined_all = " | ".join([res.get("dialog_text") or "", joined_msgs]).strip()
+
+        # *** NEW *** also read the Message Popover (this is where "already exists" lives)
+        pop_msgs = []
+        try:
+            pop_msgs = footer.open_and_read_messages(timeout=max(6, el._timeout))
+        except Exception:
+            pop_msgs = []
+        if pop_msgs:
+            # add to the joined blob for the same downstream checks
+            joined_all = " | ".join(filter(None, [joined_all, " | ".join(pop_msgs)]))
+        # close popover (so footer buttons stay clickable)
+        try:
+            footer.close_message_popover_if_open(timeout=3)
+        except Exception:
+            pass
 
         # === POLICY REMAP ===
         # TCURR lock anywhere → Pending (not Locked)
@@ -3101,31 +3110,48 @@ class CurrencyExchangeRatesPage(Page):
                 }
             }
 
-        # Duplicate exists → Skipped
-        if self._is_duplicate_exists(joined_all):
-            try: DialogWatcher(self.driver).close(timeout=1.0)
+        # Duplicate exists → Skipped **AND discard draft** (new behavior)
+        # keep your existing detector, but now it sees popover text too
+        if self._is_duplicate_exists(joined_all) or ("already exists" in joined_all.lower()):
+            # close any popover/dialog so the footer is clickable
+            try: DialogWatcher(self.driver).close(timeout=1.2)
             except Exception: pass
+            try: footer.close_message_popover_if_open(timeout=2)
+            except Exception: pass
+
+            # attempt to discard the draft quietly
+            try:
+                _discarded = footer.discard_draft(timeout=max(8, el._timeout))
+            except Exception:
+                _discarded = False
+
+            # close side column (no-op if already closed) and go back to list
             SideColumnController(self.driver).close_if_present(timeout=min(12, max(10, el._timeout)))
             try: self.back_to_list()
             except Exception: pass
-            return {
+
+            out = {
                 "status": "skipped",
                 "dialog_open": False,
                 "dialog_text": res.get("dialog_text", ""),
-                "notes": {"already_existed": True}
+                "notes": {
+                    "already_existed": True,
+                    "draft_discarded": bool(_discarded),
+                    "message_count": len(pop_msgs) if pop_msgs else len(msgs_from_res),
+                },
             }
+            return out
 
-        # Created passes through as Created (Done by the worker/runner mapping)
+        # Created passes through as Created (runner/worker mapping unchanged)
         if status == "created":
             return res
 
-        # Activation error: keep as 'error' (visible) unless policy conditions matched above
-        # Unknown: your policy wants re-queue → map to 'pending'
+        # Unknown: re-queue → map to 'pending'
         if status == "unknown":
             res["status"] = "pending"
             return res
 
-        # anything else (dialog_open without recognized messages etc.) → return as-is
+        # anything else → return as-is (error/activation_error/dialog_open, etc.)
         return res
 
     def create_rate(
@@ -3694,6 +3720,9 @@ from .selectors import (
     EDIT_BTN_ID_SUFFIX,
     DISCARD_BTN_ID_SUFFIX,
     COPY_BTN_ID_CONTAINS,
+    MESSAGE_BTN_SUFFIX,
+    MSG_POPOVER_CLOSE_BTN_XP,
+    MSG_ITEMS_XP, 
 )
 
 def _retry_stale(fn, tries=3, pause=0.12):
@@ -3718,9 +3747,76 @@ class FooterActions(Element):
     """
 
     EXTRA_SETTLE_SEC = 0.2  # trimmed
+    def open_and_read_messages(self, timeout: int = 8) -> list[str]:
+        """
+        Clicks the footer 'Messages' button to open the Message Popover (if badge > 0),
+        returns a list of visible message titles (strings). Leaves the popover open.
+        """
+        # Find the footer messages button
+        try:
+            msg_btn_id = self._query_visible_by_suffix(MESSAGE_BTN_SUFFIX)
+        except Exception:
+            msg_btn_id = None
+
+        if not msg_btn_id:
+            return []
+
+        # Read the badge text quickly (optional; if not found, still click)
+        badge_text = ""
+        try:
+            badge_bdi = self.driver.find_element(By.ID, f"{msg_btn_id}-BDI-content")
+            badge_text = (badge_bdi.text or "").strip()
+        except Exception:
+            pass
+
+        # If nothing to show (badge empty/0), bail early
+        if badge_text and badge_text.isdigit() and int(badge_text) == 0:
+            return []
+
+        # Open the popover (toggle)
+        try:
+            btn = WebDriverWait(self.driver, 3, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.ID, msg_btn_id))
+            )
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+            except Exception:
+                pass
+            try:
+                btn.click()
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", btn)
+                except Exception:
+                    pass
+        except Exception:
+            return []
+
+        # Wait for message items to render
+        try:
+            WebDriverWait(self.driver, timeout, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.presence_of_element_located((By.XPATH, MSG_ITEMS_XP))
+            )
+        except TimeoutException:
+            return []
+
+        # Collect item titles
+        texts = []
+        try:
+            items = self.driver.find_elements(By.XPATH, MSG_ITEMS_XP)
+            for it in items:
+                try:
+                    txt = (it.text or "").strip()
+                    if txt:
+                        texts.append(txt)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return texts
+
 
     # ---------- finding & UI5 press helpers ----------
-
     def _query_visible_by_suffix(self, suffix: str) -> str | None:
         try:
             return self.driver.execute_script(
@@ -3927,6 +4023,143 @@ class FooterActions(Element):
 
         return info
 
+    def close_message_popover_if_open(self, timeout: int = 3) -> bool:
+        """
+        Closes the Message Popover if it is open. Returns True if we believe it closed.
+        """
+        # Prefer the close button in the popover header
+        try:
+            close_btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.XPATH, MSG_POPOVER_CLOSE_BTN_XP))
+            )
+            try:
+                close_btn.click()
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", close_btn)
+                except Exception:
+                    pass
+            # Wait until close button disappears
+            WebDriverWait(self.driver, timeout, ignored_exceptions=(StaleElementReferenceException,)).until_not(
+                EC.presence_of_element_located((By.XPATH, MSG_POPOVER_CLOSE_BTN_XP))
+            )
+            return True
+        except Exception:
+            # Fallback: toggle the Messages button to close
+            try:
+                msg_btn_id = self._query_visible_by_suffix(MESSAGE_BTN_SUFFIX)
+                if msg_btn_id:
+                    btn = self.driver.find_element(By.ID, msg_btn_id)
+                    try:
+                        btn.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", btn)
+                    return True
+            except Exception:
+                pass
+            return False
+
+    def discard_draft(self, timeout: int = 10) -> bool:
+        """
+        Clicks footer 'Discard Draft', then confirms 'Discard' in the confirmation popover.
+        Returns True if confirmation popover disappears.
+        """
+        import time
+
+        # 1) Click footer 'Discard Draft'
+        disc_id = None
+        try:
+            disc_id = self._query_visible_by_suffix("--discard")
+        except Exception:
+            pass
+
+        if disc_id:
+            try:
+                el = WebDriverWait(self.driver, 2, ignored_exceptions=(StaleElementReferenceException,)).until(
+                    EC.element_to_be_clickable((By.ID, disc_id))
+                )
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                except Exception:
+                    pass
+                try:
+                    el.click()
+                except Exception:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", el)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # UI5 press fallback
+            _ = self._ui5_press_by_id(disc_id)
+
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+        time.sleep(self.EXTRA_SETTLE_SEC)
+
+        # 2) Confirm 'Discard' in popover
+        CONFIRM_SUFFIX = "--DiscardDraftConfirmButton"
+
+        def _click_confirm() -> bool:
+            # by ID suffix
+            try:
+                cid = self._query_visible_by_suffix(CONFIRM_SUFFIX)
+            except Exception:
+                cid = None
+
+            if cid:
+                try:
+                    btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                        EC.element_to_be_clickable((By.ID, cid))
+                    )
+                    try:
+                        self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                    except Exception:
+                        pass
+                    try:
+                        btn.click()
+                    except Exception:
+                        try:
+                            self.driver.execute_script("arguments[0].click();", btn)
+                        except Exception:
+                            pass
+                    return True
+                except Exception:
+                    pass
+
+            # by visible text
+            try:
+                xp = ("//bdi[normalize-space()='Discard']/ancestor::button[1]"
+                    " | //button[.//bdi[normalize-space()='Discard']]")
+                btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                    EC.element_to_be_clickable((By.XPATH, xp))
+                )
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                except Exception:
+                    pass
+                try:
+                    btn.click()
+                except Exception:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", btn)
+                    except Exception:
+                        pass
+                return True
+            except Exception:
+                return False
+
+        clicked = _click_confirm()
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+        time.sleep(self.EXTRA_SETTLE_SEC)
+
+        # If confirm button no longer visible, assume success
+        try:
+            still = self._query_visible_by_suffix(CONFIRM_SUFFIX)
+        except Exception:
+            still = None
+        return bool(clicked and not still)
+
     def ensure_created_by_loop_clicking(
         self,
         object_header_ready: Callable[[], bool],
@@ -4060,6 +4293,10 @@ EDIT_BTN_ID_SUFFIX     = "--edit"
 DELETE_BTN_ID_SUFFIX   = "--delete"
 DISCARD_BTN_ID_SUFFIX  = "--discard"
 COPY_BTN_ID_CONTAINS   = "::Copy"
+
+MESSAGE_BTN_SUFFIX = "--showMessages"
+MSG_POPOVER_CLOSE_BTN_XP = "//button[contains(@class,'sapMMsgPopoverCloseBtn')]"
+MSG_ITEMS_XP = "//li[contains(@class,'sapMMsgViewItem')]//span[contains(@id,'-titleText')]"
 
 
 # pages\CurrencyExchangeRates\elements\Footer\__init__.py

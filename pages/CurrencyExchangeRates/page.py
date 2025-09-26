@@ -386,7 +386,7 @@ class CurrencyExchangeRatesPage(Page):
             fields.set_plain_input(fields.TO_CCY_INPUT_XPATH, to_ccy, press_enter=True)
             _verify_or_retype(fields.TO_CCY_INPUT_XPATH, to_ccy)
 
-            # 4) Valid From — **DD.MM.YYYY** (typed EXACTLY as provided)
+            # 4) Valid From — **DD.MM.YYYY**
             fields.set_plain_input(fields.VALID_FROM_INPUT_XPATH, valid_from_ddmmyyyy, press_enter=True)
             _verify_or_retype(fields.VALID_FROM_INPUT_XPATH, valid_from_ddmmyyyy)
 
@@ -422,9 +422,7 @@ class CurrencyExchangeRatesPage(Page):
             return any(k in blob for k in keys)
 
         def _commit_flow_under_gate() -> dict:
-            # same provider
             gate_ctx = commit_gate() if callable(commit_gate) else _noop_gate_ctx()
-            # Hold the gate for the ENTIRE commit attempt to prevent overlapping commits.
             with gate_ctx:
                 first_phase = footer.click_create(clicks=1)
 
@@ -500,7 +498,6 @@ class CurrencyExchangeRatesPage(Page):
 
         # 2.5) SOFT GUARD: ensure Exchange Rate Type *contains* "M"
         m_check = self._soft_ensure_exch_type_contains_M(fields, exch_type)
-        # (we still proceed; just annotate later if needed)
 
         # 3) Pre-submit validation (client)
         err = ValidationInspector(self.driver).collect()
@@ -510,9 +507,6 @@ class CurrencyExchangeRatesPage(Page):
             ExchangeRateField(self.driver).set_via_ui5(rate_str)
             ExchangeRateField(self.driver).commit(times=1)
             err = ValidationInspector(self.driver).collect()
-
-        # ---------------- Commit with POLICY REMAP ----------------
-        # NOTE: The old code retried locks; your policy maps TCURR locks to PENDING directly.
 
         # 4) COMMIT attempt
         res = _commit_flow_under_gate()
@@ -525,9 +519,24 @@ class CurrencyExchangeRatesPage(Page):
             res["notes"]["observed_exch_type"] = m_check.get("observed", "")
 
         # --- Build a combined message blob for policy checks
-        msgs = res.get("messages", []) or []
-        joined_msgs = " | ".join(f"{(m.get('message') or '')} {m.get('description') or ''}".strip() for m in msgs)
+        msgs_from_res = res.get("messages", []) or []
+        joined_msgs = " | ".join(f"{(m.get('message') or '')} {m.get('description') or ''}".strip() for m in msgs_from_res)
         joined_all = " | ".join([res.get("dialog_text") or "", joined_msgs]).strip()
+
+        # *** NEW *** also read the Message Popover (this is where "already exists" lives)
+        pop_msgs = []
+        try:
+            pop_msgs = footer.open_and_read_messages(timeout=max(6, el._timeout))
+        except Exception:
+            pop_msgs = []
+        if pop_msgs:
+            # add to the joined blob for the same downstream checks
+            joined_all = " | ".join(filter(None, [joined_all, " | ".join(pop_msgs)]))
+        # close popover (so footer buttons stay clickable)
+        try:
+            footer.close_message_popover_if_open(timeout=3)
+        except Exception:
+            pass
 
         # === POLICY REMAP ===
         # TCURR lock anywhere → Pending (not Locked)
@@ -549,31 +558,48 @@ class CurrencyExchangeRatesPage(Page):
                 }
             }
 
-        # Duplicate exists → Skipped
-        if self._is_duplicate_exists(joined_all):
-            try: DialogWatcher(self.driver).close(timeout=1.0)
+        # Duplicate exists → Skipped **AND discard draft** (new behavior)
+        # keep your existing detector, but now it sees popover text too
+        if self._is_duplicate_exists(joined_all) or ("already exists" in joined_all.lower()):
+            # close any popover/dialog so the footer is clickable
+            try: DialogWatcher(self.driver).close(timeout=1.2)
             except Exception: pass
+            try: footer.close_message_popover_if_open(timeout=2)
+            except Exception: pass
+
+            # attempt to discard the draft quietly
+            try:
+                _discarded = footer.discard_draft(timeout=max(8, el._timeout))
+            except Exception:
+                _discarded = False
+
+            # close side column (no-op if already closed) and go back to list
             SideColumnController(self.driver).close_if_present(timeout=min(12, max(10, el._timeout)))
             try: self.back_to_list()
             except Exception: pass
-            return {
+
+            out = {
                 "status": "skipped",
                 "dialog_open": False,
                 "dialog_text": res.get("dialog_text", ""),
-                "notes": {"already_existed": True}
+                "notes": {
+                    "already_existed": True,
+                    "draft_discarded": bool(_discarded),
+                    "message_count": len(pop_msgs) if pop_msgs else len(msgs_from_res),
+                },
             }
+            return out
 
-        # Created passes through as Created (Done by the worker/runner mapping)
+        # Created passes through as Created (runner/worker mapping unchanged)
         if status == "created":
             return res
 
-        # Activation error: keep as 'error' (visible) unless policy conditions matched above
-        # Unknown: your policy wants re-queue → map to 'pending'
+        # Unknown: re-queue → map to 'pending'
         if status == "unknown":
             res["status"] = "pending"
             return res
 
-        # anything else (dialog_open without recognized messages etc.) → return as-is
+        # anything else → return as-is (error/activation_error/dialog_open, etc.)
         return res
 
     def create_rate(
