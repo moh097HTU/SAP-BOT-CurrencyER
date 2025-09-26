@@ -7,8 +7,9 @@ import shutil
 import time
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Iterable, Optional
+from typing import Any, Dict, List, Tuple, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from datetime import datetime
 
 from services.schemas import ExchangeRateItem
 from services.driver import ensure_driver_binary_ready, cleanup_profiles
@@ -23,6 +24,7 @@ from services.reporting import (
     ensure_reports_dir,
     write_json,
     write_failed_csv,
+    write_skipped_csv,
     append_daily_rollup,
     move_tracker_if_finished,
     prune_live_trackers,
@@ -40,17 +42,55 @@ class BatchRunner:
         self.batch_dir = ensure_reports_dir(self.reports_root / batch_id)
         self.track_dir = tracking_dir_for_batch(cfg, batch_id)
 
+    # ---------- helpers: records' day (from ValidFrom) + relocate ----------
+
+    @staticmethod
+    def _as_record_day(v: str | None) -> str | None:
+        """
+        Normalize ValidFrom (DD.MM.YYYY) -> YYYY-MM-DD
+        """
+        if not v:
+            return None
+        try:
+            return datetime.strptime(v.strip(), "%d.%m.%Y").strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
+    def _record_day_from_items(self, items: List[ExchangeRateItem]) -> str | None:
+        days = {self._as_record_day(it.ValidFrom) for it in items if self._as_record_day(it.ValidFrom)}
+        return list(days)[0] if len(days) == 1 else None
+
+    def _record_day_from_results(self, results: List[Dict[str, Any]]) -> str | None:
+        days = set()
+        for r in results:
+            p = r.get("payload") or {}
+            d = self._as_record_day(p.get("ValidFrom"))
+            if d:
+                days.add(d)
+        return list(days)[0] if len(days) == 1 else None
+
+    def _relocate_batch_under_day(self, day: str | None) -> None:
+        """
+        Move reports/<batch_id> → reports/<YYYY-MM-DD>/<batch_id>
+        (no-op if day is None).
+        """
+        if not day:
+            return
+        target_root = ensure_reports_dir(self.reports_root / day)
+        target = target_root / self.batch_id
+        if str(target.resolve()) == str(self.batch_dir.resolve()):
+            return
+        try:
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            shutil.move(str(self.batch_dir), str(target))
+            self.batch_dir = target
+        except Exception as e:
+            log.error("[relocate] failed moving batch_dir into day folder %s: %s: %s", day, type(e).__name__, e)
+
     # ---------- internal helpers ----------
 
     def _run_multithread_once(self, items: List[ExchangeRateItem]) -> Dict[str, Any]:
-        """
-        One round:
-          - shard items
-          - spin N workers (each with its own Chrome & tracker file)
-          - collect results (tolerate crashing workers)
-          - synthesize 'Pending' rows from tracking files for any missing indices
-          - cleanup per-thread Chrome profiles
-        """
         try:
             ensure_driver_binary_ready()
         except Exception:
@@ -61,10 +101,8 @@ class BatchRunner:
         stop_event = threading.Event()
         login_sem = threading.BoundedSemaphore(int(self.cfg.get("LOGIN_CONCURRENCY", min(2, self.workers))))
 
-        # create tracking files for this round (initialize as Pending)
         init_tracking_files(self.track_dir, shards)
 
-        # remember track files per worker id
         track_files = {w_id: tracking_path_for_worker(self.track_dir, w_id)
                        for w_id, _ in enumerate(shards, start=1)}
 
@@ -77,12 +115,10 @@ class BatchRunner:
                     worker_process, shard, stop_event, login_sem, self.cfg, w_id, track_file
                 ))
 
-            # collect results; tolerate crashing workers
             for fut in as_completed(futures):
                 try:
                     r = fut.result()
                 except Exception as e:
-                    # synthesize a worker-level error row; pending rows will be re-added below
                     r = {"results": [{
                         "index": None,
                         "status": "error",
@@ -90,7 +126,6 @@ class BatchRunner:
                     }]}
                 all_results.extend(r.get("results", []))
 
-        # === Synthesize 'Pending' rows from tracking for any indexes with no row ===
         have_idx = {r.get("index") for r in all_results if r.get("index") is not None}
         for tf in track_files.values():
             try:
@@ -102,7 +137,6 @@ class BatchRunner:
             except Exception:
                 pass
 
-        # finish profiles
         try:
             cleanup_profiles(also_base=True)
         except Exception:
@@ -113,10 +147,6 @@ class BatchRunner:
 
     # ---------------- PUBLIC: non-streaming ----------------
     def run_force_all_done(self, items: List[ExchangeRateItem]) -> Dict[str, Any]:
-        """
-        Multi-round runner, but ONLY requeues rows whose latest status is exactly 'Pending'.
-        Anything else ('created', 'error', 'locked', 'skipped', 'unknown', etc.) will NOT be retried.
-        """
         workers = self.workers
         base_sleep = max(0, int(self.cfg.get("FORCE_ALL_DONE_BASE_SLEEP_SEC", 8)))
         max_rounds = int(self.cfg.get("FORCE_ALL_DONE_MAX_ROUNDS", 25))
@@ -125,9 +155,7 @@ class BatchRunner:
         start_ts = time.time()
         time_cap = (max_minutes > 0)
 
-        # index -> latest row result
         aggregate_results: Dict[int, Dict[str, Any]] = {}
-        # start with everything in 'Pending' queue; but we only requeue if worker says 'Pending'
         pending: List[Tuple[int, ExchangeRateItem]] = list(enumerate(items, start=1))
         round_no = 0
 
@@ -143,14 +171,12 @@ class BatchRunner:
                 r = self._run_multithread_once(round_items)
                 round_rows = r.get("results", [])
 
-                # stitch back original indices
                 lim = min(len(round_rows), len(pending))
                 for i in range(lim):
                     orig_idx = pending[i][0]
                     row = {**round_rows[i], "round": round_no}
                     aggregate_results[orig_idx] = row
 
-                # requeue ONLY 'Pending'
                 next_pending: List[Tuple[int, ExchangeRateItem]] = []
                 for i in range(lim):
                     orig_idx, orig_item = pending[i]
@@ -165,7 +191,6 @@ class BatchRunner:
                 else:
                     pending = []
 
-            # Fill defaults for any missing
             for idx in range(1, len(items) + 1):
                 aggregate_results.setdefault(idx, {
                     "index": idx,
@@ -180,6 +205,7 @@ class BatchRunner:
             failed_rows = [r for r in final_rows if (r.get("status") or "").lower() not in ("created", "skipped")]
             failed = len(failed_rows)
             skipped = sum(1 for r in final_rows if (r.get("status") or "").lower() == "skipped")
+            skipped_rows = [r for r in final_rows if (r.get("status") or "").lower() == "skipped"]
 
             return {
                 "ok": failed == 0,
@@ -189,13 +215,13 @@ class BatchRunner:
                 "failed": failed,
                 "skipped": skipped,
                 "results": final_rows,
+                "skipped_rows": skipped_rows,
                 "force_all_done_rounds_used": round_no,
                 "force_all_done_max_rounds": max_rounds,
                 "force_all_done_time_cap_minutes": max_minutes,
                 "track_dir": str(self.track_dir),
             }
         finally:
-            # Clean tracking artifacts for this batch (note: archiving happens in persist/email)
             try:
                 if self.track_dir.exists():
                     shutil.rmtree(self.track_dir, ignore_errors=True)
@@ -204,9 +230,6 @@ class BatchRunner:
 
     # ---------------- PUBLIC: streaming ----------------
     def stream_events(self, items: List[ExchangeRateItem], heartbeat_sec: int = 5) -> Iterable[str]:
-        """
-        NDJSON stream. Only requeues rows whose latest status is 'Pending'.
-        """
         start_ts = time.time()
         workers = self.workers
         base_sleep = max(0, int(self.cfg.get("FORCE_ALL_DONE_BASE_SLEEP_SEC", 8)))
@@ -277,35 +300,12 @@ class BatchRunner:
                             yield self._json_line({"event": "tick", "ts": self._iso_now()})
                             last_emit = time.time()
 
-                # compute next pending: ONLY rows whose latest status is 'Pending'
-                next_pending: List[Tuple[int, ExchangeRateItem]] = []
-                last_by_index: Dict[int, Dict[str, Any]] = {}
-                for row in all_rows_this_batch:
-                    idx = row.get("index")
-                    if idx is not None:
-                        last_by_index[idx] = row
-
-                for orig_idx, item in pending_pairs:
-                    r = last_by_index.get(orig_idx)
-                    if r:
-                        aggregate[orig_idx] = r
-                        if (r.get("status") or "").strip().lower() == "pending":
-                            next_pending.append((orig_idx, item))
-                    else:
-                        # no result yet → treat as error and do not requeue
-                        aggregate[orig_idx] = {"index": orig_idx, "status": "error", "error": "no_result", "round": round_no}
-
-                if next_pending:
-                    time.sleep(base_sleep + random.uniform(0, 2.0))
-                    pending_pairs = next_pending
-                else:
-                    pending_pairs = []
-
             results_sorted = sorted(list(aggregate.values()), key=lambda x: (x.get("index") or 0))
             created = sum(1 for r in results_sorted if (r.get("status") or "").lower() == "created")
             failed_rows = [r for r in results_sorted if (r.get("status") or "").lower() not in ("created", "skipped")]
             failed = len(failed_rows)
             skipped = sum(1 for r in results_sorted if (r.get("status") or "").lower() == "skipped")
+            skipped_rows = [r for r in results_sorted if (r.get("status") or "").lower() == "skipped"]
             duration_sec = time.time() - start_ts
 
             result = {
@@ -326,13 +326,22 @@ class BatchRunner:
             result_path = self.batch_dir / "result.json"
             failed_json_path = self.batch_dir / "failed.json"
             failed_csv_path = self.batch_dir / "failed.csv"
+            skipped_json_path = self.batch_dir / "skipped.json"
+            skipped_csv_path = self.batch_dir / "skipped.csv"
+
             write_json(result_path, result)
             write_json(failed_json_path, failed_rows)
             write_failed_csv(failed_csv_path, failed_rows)
+            write_json(skipped_json_path, skipped_rows)
+            write_skipped_csv(skipped_csv_path, skipped_rows)
 
-            # daily rollup + archive/prune
+            # figure records' day from the batch items and MOVE under reports/<day>/<batch_id>
+            rec_day = self._record_day_from_items(items)
+            self._relocate_batch_under_day(rec_day)
+
+            # daily rollup + archive/prune (by records' day)
             try:
-                append_daily_rollup(self.batch_id, {**result, "duration_sec": round(duration_sec, 2)})
+                append_daily_rollup(self.batch_id, {**result, "duration_sec": round(duration_sec, 2)}, day=rec_day)
             except Exception:
                 pass
             try:
@@ -341,6 +350,13 @@ class BatchRunner:
                 prune_live_trackers(self.cfg, keep_n=int(self.cfg.get("NUM_LIVE_TRACKERS", 10)))
             except Exception:
                 pass
+
+            # recompute artifact paths after potential relocate
+            result_path = self.batch_dir / "result.json"
+            failed_json_path = self.batch_dir / "failed.json"
+            failed_csv_path = self.batch_dir / "failed.csv"
+            skipped_json_path = self.batch_dir / "skipped.json"
+            skipped_csv_path = self.batch_dir / "skipped.csv"
 
             yield self._json_line({
                 "event": "end",
@@ -355,9 +371,12 @@ class BatchRunner:
                     "result_json": str(result_path),
                     "failed_json": str(failed_json_path),
                     "failed_csv": str(failed_csv_path),
+                    "skipped_json": str(skipped_json_path),
+                    "skipped_csv": str(skipped_csv_path),
                 },
                 "email": {"ok": False, "reason": "not_requested"},
                 "track_dir": str(self.track_dir),
+                "records_day": rec_day,
             })
 
         finally:
@@ -380,26 +399,32 @@ class BatchRunner:
         })
 
     def persist_and_email(self, result: Dict[str, Any], duration_sec: float) -> Dict[str, Any]:
-        """
-        Persist result JSON/CSV, email (if enabled + failures), then
-        append to the daily rollup and archive/prune trackers accordingly.
-        """
         results = result.get("results", [])
         failed_rows = [r for r in results if (r.get("status") or "").lower() not in ("created", "skipped")]
+        skipped_rows = [r for r in results if (r.get("status") or "").lower() == "skipped"]
 
         result_path = self.batch_dir / "result.json"
         failed_json_path = self.batch_dir / "failed.json"
         failed_csv_path = self.batch_dir / "failed.csv"
+        skipped_json_path = self.batch_dir / "skipped.json"
+        skipped_csv_path = self.batch_dir / "skipped.csv"
+
         write_json(result_path, result)
         write_json(failed_json_path, failed_rows)
         write_failed_csv(failed_csv_path, failed_rows)
+        write_json(skipped_json_path, skipped_rows)
+        write_skipped_csv(skipped_csv_path, skipped_rows)
+
+        # relocate under records' day (derived from results payloads)
+        rec_day = self._record_day_from_results(results)
+        self._relocate_batch_under_day(rec_day)
 
         # Email summary if enabled & there are failures
         email_info = {"ok": False, "reason": "not_requested"}
         if self.cfg.get("EMAIL_ENABLED") and failed_rows:
             try:
                 from services.notify import send_batch_email
-                attachments = [str(failed_json_path), str(failed_csv_path)]
+                attachments = [str(self.batch_dir / "failed.json"), str(self.batch_dir / "failed.csv")]
                 email_info = send_batch_email(
                     batch_id=self.batch_id,
                     received_count=result.get("total", 0),
@@ -411,27 +436,32 @@ class BatchRunner:
             except Exception as e:
                 email_info = {"ok": False, "reason": f"send_error: {type(e).__name__}: {e}"}
 
+        # paths may have changed after relocate
         result_out = dict(result)
         result_out.update({
             "batch_id": self.batch_id,
             "duration_sec": round(duration_sec, 2),
             "reports": {
                 "dir": str(self.batch_dir),
-                "result_json": str(result_path),
-                "failed_json": str(failed_json_path),
-                "failed_csv": str(failed_csv_path),
+                "result_json": str(self.batch_dir / "result.json"),
+                "failed_json": str(self.batch_dir / "failed.json"),
+                "failed_csv": str(self.batch_dir / "failed.csv"),
+                "skipped_json": str(self.batch_dir / "skipped.json"),
+                "skipped_csv": str(self.batch_dir / "skipped.csv"),
             },
             "email": email_info,
+            "records_day": rec_day,
         })
 
-        # Append to daily rollup
+        # Append to daily rollup for that records' day
         try:
-            append_daily_rollup(self.batch_id, result_out)
+            append_daily_rollup(self.batch_id, result_out, day=rec_day)
         except Exception:
             pass
 
-        # If tracker is finished (no Pending), archive it; then prune live
+        # Archive tracker & prune
         try:
+            from services.tracking import tracking_dir_for_batch
             _td = tracking_dir_for_batch(self.cfg, self.batch_id)
             move_tracker_if_finished(self.cfg, self.batch_id, _td)
             prune_live_trackers(self.cfg, keep_n=int(self.cfg.get("NUM_LIVE_TRACKERS", 10)))

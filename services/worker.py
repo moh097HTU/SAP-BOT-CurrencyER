@@ -129,6 +129,27 @@ def worker_process(
                 time.sleep(1.0 * attempt)
         raise RuntimeError(f"open_app_failed after {max_open_retries} attempts: {last_exc}")
 
+    def _track_skipped(idx: int, row: Dict[str, Any]):
+        """
+        Ensure dialog_text (or error) is persisted for Skipped rows, both in results and tracking.
+        """
+        # normalize & keep dialog_text in results
+        if not row.get("dialog_text"):
+            # sometimes the page may put the message in 'error'
+            if row.get("error"):
+                row["dialog_text"] = row["error"]
+        results.append(row)
+        if track_file_path:
+            mark_item_status(
+                track_file_path,
+                idx,
+                "Skipped",
+                {
+                    "notes": row.get("notes", {}),
+                    "dialog_text": row.get("dialog_text") or "",
+                },
+            )
+
     try:
         try:
             page = _recreate_driver_and_reopen()
@@ -178,9 +199,7 @@ def worker_process(
                         if track_file_path:
                             mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
                     elif st == "skipped":
-                        results.append(row)
-                        if track_file_path:
-                            mark_item_status(track_file_path, idx, "Skipped", {"notes": row.get("notes", {})})
+                        _track_skipped(idx, row)
                     elif st == "pending":
                         results.append(row)
                         if track_file_path:
@@ -189,7 +208,7 @@ def worker_process(
                         results.append({**row, "status": "error"})
                         if track_file_path:
                             mark_item_status(track_file_path, idx, "Error",
-                                             {"error": row.get("error") or row.get("dialog_text") or ""})
+                                             {"error": row.get("error") | row.get("dialog_text") if isinstance(row.get("error"), str) else (row.get("dialog_text") or "")})
                     time.sleep(0.2)
                     break
 
@@ -203,7 +222,7 @@ def worker_process(
                         if st == "created":
                             results.append(row); mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
                         elif st == "skipped":
-                            results.append(row); mark_item_status(track_file_path, idx, "Skipped", {"notes": row.get("notes", {})})
+                            _track_skipped(idx, row)
                         elif st == "pending":
                             results.append(row); mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
                         else:
@@ -245,7 +264,7 @@ def worker_process(
                             if st == "created":
                                 results.append(row); mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
                             elif st == "skipped":
-                                results.append(row); mark_item_status(track_file_path, idx, "Skipped", {"notes": row.get("notes", {})})
+                                _track_skipped(idx, row)
                             elif st == "pending":
                                 results.append(row); mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
                             else:
@@ -275,7 +294,7 @@ def worker_process(
                             if st == "created":
                                 results.append(row); mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
                             elif st == "skipped":
-                                results.append(row); mark_item_status(track_file_path, idx, "Skipped", {"notes": row.get("notes", {})})
+                                _track_skipped(idx, row)
                             elif st == "pending":
                                 results.append(row); mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
                             else:
@@ -315,7 +334,7 @@ def worker_process(
                                 if st == "created":
                                     results.append(row); mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
                                 elif st == "skipped":
-                                    results.append(row); mark_item_status(track_file_path, idx, "Skipped", {"notes": row.get("notes", {})})
+                                    _track_skipped(idx, row)
                                 elif st == "pending":
                                     results.append(row); mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
                                 else:
