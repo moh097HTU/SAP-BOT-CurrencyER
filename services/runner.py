@@ -277,30 +277,24 @@ class BatchRunner:
                     pending_futs = set(futures)
                     last_emit = time.time()
 
-                    while pending_futs:
+                    while pending_futs: 
                         done, pending_futs = wait(pending_futs, timeout=heartbeat_sec, return_when=FIRST_COMPLETED)
-
+                        
                         for fut in done:
-                            try:
+                            try: 
                                 r = fut.result()
                             except Exception as e:
-                                r = {"results": [
-                                    {"index": None, "status": "error",
-                                     "error": f"worker_crashed: {type(e).__name__}: {e}", "round": round_no}
-                                ]}
-                            rows = r.get("results", [])
-                            for row in rows:
+                                r = {"results": [ {"index": None, "status": "error", "error": f"worker_crashed: {type(e).__name__}: {e}", "round": round_no} ]}
+                        
+                            rows = r.get("results", []) 
+                            for row in rows: 
                                 row["round"] = round_no
-                                # >>> ADD THESE LINES <<<
-                                idx = row.get("index")
-                                if idx is not None:
-                                    aggregate[idx] = row
-                                # <<<<<<<<<<<<<<<<<<<<<<<<
-                            all_rows_this_batch.extend(rows)
+                            all_rows_this_batch.extend(rows) 
+                            
                             for row in rows:
                                 yield self._json_line({"event": "row", **row})
                             last_emit = time.time()
-
+                            
                         if (time.time() - last_emit) >= heartbeat_sec:
                             yield self._json_line({"event": "tick", "ts": self._iso_now()})
                             last_emit = time.time()
