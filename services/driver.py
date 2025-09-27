@@ -1,4 +1,7 @@
 # services/driver.py
+# -----------------------------------------------
+# FULL FILE (adds download_dir support & unified prefs)
+# -----------------------------------------------
 from __future__ import annotations
 
 import os
@@ -67,7 +70,10 @@ def _per_thread_profile_dir() -> str:
 def _random_debug_port() -> int:
     return random.randint(9223, 9550)
 
-def get_driver(headless: bool = True) -> webdriver.Chrome:
+def get_driver(headless: bool = True, download_dir: str | None = None) -> webdriver.Chrome:
+    """
+    Create a Chrome driver. If download_dir is provided, Chrome will save files there silently.
+    """
     cfg = config()
 
     driver_path = ensure_driver_binary_ready()
@@ -92,14 +98,27 @@ def get_driver(headless: bool = True) -> webdriver.Chrome:
     options.add_argument("--lang=en-US")
     options.add_argument("--no-first-run")
     options.add_argument("--no-default-browser-check")
-
     options.add_argument("--log-level=3")
     options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     options.add_experimental_option("useAutomationExtension", False)
-    options.add_experimental_option("prefs", {
+
+    # -------- unified prefs (includes optional download_dir) --------
+    prefs = {
         "credentials_enable_service": False,
         "profile.password_manager_enabled": False,
-    })
+    }
+    if download_dir:
+        dl = str(Path(download_dir).resolve())
+        Path(dl).mkdir(parents=True, exist_ok=True)
+        prefs.update({
+            "download.default_directory": dl,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True,
+            "savefile.default_directory": dl,
+        })
+    options.add_experimental_option("prefs", prefs)
+    # ---------------------------------------------------------------
 
     try:
         options.add_argument(f"--remote-debugging-port={_random_debug_port()}")
@@ -167,22 +186,16 @@ def _cmdline_has_userdata_under_base(cmdline: list[str], base: Path) -> bool:
                 path = ""
             if path and Path(path).resolve().as_posix().startswith(base.as_posix()):
                 return True
-        # Some shells may separate option and value as two args
     for i, a in enumerate(cmdline or []):
         if a == "--user-data-dir" and i + 1 < len(cmdline):
             path = _safe_str(cmdline[i + 1])
             if path and Path(path).resolve().as_posix().startswith(base.as_posix()):
                 return True
-        # Generic containment check as a fallback
         if b in _safe_str(a):
             return True
     return False
 
 def _should_kill(proc, base: Path) -> bool:
-    """
-    Decide whether to kill this process based on its name/cmdline and profile base.
-    We only target Chrome/Chromium and chromedriver that reference our profile base.
-    """
     try:
         name = _safe_str(proc.info.get("name")).lower()
         cmd  = proc.info.get("cmdline") or []
@@ -196,13 +209,12 @@ def _should_kill(proc, base: Path) -> bool:
         return True
 
     if name in driver_names:
-        # If chromedriver itself mentions our base, kill it.
         if _cmdline_has_userdata_under_base(cmd, base):
             return True
-        # Else, if any child Chrome matches our base, kill chromedriver too.
         try:
             for child in proc.children(recursive=True):
                 try:
+                    from psutil import NoSuchProcess  # type: ignore
                     cname = _safe_str(child.name()).lower()
                     ccmd  = child.cmdline() or []
                     if cname in chrome_names and _cmdline_has_userdata_under_base(ccmd, base):
@@ -211,15 +223,9 @@ def _should_kill(proc, base: Path) -> bool:
                     continue
         except Exception:
             pass
-
     return False
 
 def kill_strays() -> dict:
-    """
-    Best-effort: kill leftover chrome/chromedriver processes that are bound to
-    our CHROME_USER_DATA_BASE tree (i.e., launched by us). Requires psutil; otherwise no-op.
-    Returns a dict with 'ok', 'killed' (list of PIDs), and optional 'reason'.
-    """
     try:
         import psutil  # type: ignore
     except Exception:
@@ -233,7 +239,6 @@ def kill_strays() -> dict:
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 if _should_kill(proc, base):
-                    # Try terminate first; escalate to kill if needed
                     try:
                         proc.terminate()
                     except Exception:
@@ -284,15 +289,9 @@ def _rmtree_force(p: Path, retries: int = 3, delay: float = 0.25):
         pass
 
 def cleanup_profiles(also_base: bool = True) -> dict:
-    """
-    Remove all per-worker profile dirs we created this run.
-    Before deleting, best-effort kill any chrome/chromedriver processes that
-    still reference our profile base (prevents 'in use' errors).
-    """
     try:
         _ = kill_strays()
     except Exception:
-        # Never let cleanup crash the runner
         pass
 
     deleted = []
