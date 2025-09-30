@@ -373,6 +373,39 @@ class CurrencyExchangeRatesPage(Page):
             if cur.lower() != (expected or "").strip().lower():
                 quote.set_value(expected)
 
+        def _cleanup_draft_and_return(base: dict, status_override: str, reason: str, extra_notes: dict | None = None) -> dict:
+            out = dict(base or {})
+            if status_override:
+                out["status"] = status_override
+            try:
+                DialogWatcher(self.driver).close(timeout=1.2)
+            except Exception:
+                pass
+            try:
+                footer.close_message_popover_if_open(timeout=2)
+            except Exception:
+                pass
+            try:
+                discarded = footer.discard_draft(timeout=max(8, el._timeout))
+            except Exception:
+                discarded = False
+            try:
+                SideColumnController(self.driver).close_if_present(timeout=min(12, max(10, el._timeout)))
+            except Exception:
+                pass
+            try:
+                self.back_to_list()
+            except Exception:
+                pass
+            out["dialog_open"] = False
+            notes = dict(out.get("notes") or {})
+            notes.setdefault("cleanup_reason", reason)
+            notes["draft_discarded"] = notes.get("draft_discarded", False) or bool(discarded)
+            if extra_notes:
+                notes.update(extra_notes)
+            out["notes"] = notes
+            return out
+
         def _fill_all_fields(prefer_ui5_for_rate: bool = False):
             # 1) Exchange Rate Type
             fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, exch_type, press_enter=True)
@@ -590,17 +623,27 @@ class CurrencyExchangeRatesPage(Page):
             }
             return out
 
+        required_issue = _looks_like_required_fields_issue(msgs_from_res) or ("required" in joined_all.lower())
+        if required_issue:
+            extra = {
+                "required_fields_detected": True,
+                "message_count": len(pop_msgs) if pop_msgs else len(msgs_from_res),
+            }
+            cleaned = _cleanup_draft_and_return(res, "error", "required_fields", extra)
+            return cleaned
+
         # Created passes through as Created (runner/worker mapping unchanged)
         if status == "created":
             return res
 
-        # Unknown: re-queue → map to 'pending'
+        # Unknown: re-queue ? map to 'pending'
         if status == "unknown":
             res["status"] = "pending"
             return res
 
-        # anything else → return as-is (error/activation_error/dialog_open, etc.)
-        return res
+        # For any other status ensure draft is cleared before returning
+        cleaned_default = _cleanup_draft_and_return(res, status or "error", "non_success")
+        return cleaned_default
 
     def create_rate(
         self,

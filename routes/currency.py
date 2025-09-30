@@ -85,22 +85,3 @@ async def create_exchange_rates(items: List[ExchangeRateItem]) -> Dict[str, Any]
         "api_ok": (result.get("pending", 0) == 0),  # hardened: only Done/Skipped left
     }
     return out
-
-@router.post("/currency/exchange-rates/batch/stream")
-async def create_exchange_rates_stream(items: List[ExchangeRateItem]):
-    cfg = config()
-    workers = int(cfg.get("NUM_WORKERS", 6)) or 6
-
-    batch_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + str(uuid.uuid4())[:8]
-    reports_root = ensure_reports_dir(Path(cfg.get("REPORTS_DIR") or "reports"))
-
-    runner = BatchRunner(cfg=cfg, batch_id=batch_id, reports_root=reports_root, workers=workers)
-    runner.write_request_summary([it.dict() for it in items[:5]], workers)
-
-    HEARTBEAT_SEC = int(cfg.get("STREAM_HEARTBEAT_SEC", 5))
-
-    def _gen():
-        for line in runner.stream_events(items, heartbeat_sec=HEARTBEAT_SEC):
-            yield line
-
-    return StreamingResponse(_gen(), media_type="application/x-ndjson")

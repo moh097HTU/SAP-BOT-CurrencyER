@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from functools import partial
 from typing import Dict, Any, List, Tuple
 
 from selenium.common.exceptions import (
@@ -68,6 +69,34 @@ def chunk_evenly(indexed: List[Tuple[int, ExchangeRateItem]], workers: int) -> L
     return chunks
 
 
+def _commit_key_for_item(it: ExchangeRateItem, strategy: str) -> str | None:
+    """Build a commit gate key according to the configured strategy."""
+    strat = (strategy or "full").strip().lower()
+    if strat in ("off", "none", "disabled"):
+        return None
+    if strat in ("table", "tcurr"):
+        return "TCURR"
+
+    base_parts = [
+        (it.ExchangeRateType or "").strip().upper(),
+        (it.FromCurrency or "").strip().upper(),
+        (it.ToCurrency or "").strip().upper(),
+        (it.ValidFrom or "").strip(),
+    ]
+
+    if strat in ("pair", "type_pair", "tpair"):
+        parts = base_parts[:3]
+    elif strat in ("type", "exch_type"):
+        parts = base_parts[:1]
+    elif strat in ("full", "default"):
+        parts = base_parts
+    else:
+        parts = base_parts
+
+    token = "|".join(p for p in parts if p)
+    return token or None
+
+
 def worker_process(
     shard: List[Tuple[int, ExchangeRateItem]],
     stop_event: threading.Event,
@@ -92,6 +121,8 @@ def worker_process(
     results: List[Dict[str, Any]] = []
     drv = None
     page = None
+
+    key_strategy = str(cfg.get("COMMIT_KEY_STRATEGY", "pair"))
 
     WATCHDOG_SECONDS = int(cfg.get("WATCHDOG_SECONDS", 2000))
     MAX_OPEN_RETRIES = 3
@@ -167,6 +198,7 @@ def worker_process(
             return {"interrupted": False, "results": []}
 
         for idx, it in pending_list:
+            commit_key = _commit_key_for_item(it, key_strategy)
             if stop_event.is_set():
                 stop_event.clear()
 
@@ -186,7 +218,7 @@ def worker_process(
                         valid_from_mmddyyyy=it.ValidFrom,
                         quotation=it.Quotation,
                         rate_value=it.ExchangeRate,
-                        commit_gate=commit_gate,
+                        commit_gate=(partial(commit_gate, key=commit_key) if commit_key is not None else commit_gate),
                     )
                 finally:
                     try:

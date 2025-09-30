@@ -6,3 +6,4 @@ uvicorn[standard]>=0.30
 msal>=1.28
 requests>=2.32
 psutil>=5.9
+openpyxl>=3.1

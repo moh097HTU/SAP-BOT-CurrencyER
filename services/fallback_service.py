@@ -166,7 +166,10 @@ def _read_excel_rows(xlsx_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, A
     IMPORTANT CHANGE: a row counts if it has type/date/from/to; quotation defaults to Direct;
     rate is optional (may be None). This fixes undercounting (e.g., 378 vs 380).
     """
-    import openpyxl
+    try:
+        import openpyxl
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("openpyxl is required for Excel fallback parsing; install it via 'pip install openpyxl'.") from exc
 
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
     ws = wb.active

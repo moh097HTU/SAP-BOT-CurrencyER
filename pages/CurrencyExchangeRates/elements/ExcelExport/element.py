@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -119,25 +119,58 @@ class ExcelExporter(Element):
         except Exception:
             pass
 
-    def _wait_xlsx(self, download_dir: Path, timeout: int = 120) -> Tuple[Optional[Path], int]:
+    def _wait_xlsx(
+        self,
+        download_dir: Path,
+        timeout: int = 120,
+        known: Dict[str, float] | None = None,
+        min_mtime: float | None = None,
+    ) -> Tuple[Optional[Path], int]:
         end = time.time() + max(1, timeout)
+        known = known or {}
         last: Optional[Path] = None
         while time.time() < end:
-            files = sorted(download_dir.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if files:
-                cand = files[0]
-                # consider download complete when .crdownload is gone
-                if not cand.with_suffix(cand.suffix + ".crdownload").exists():
-                    try:
-                        size = cand.stat().st_size
-                    except Exception:
-                        size = 0
-                    return cand, size
-            time.sleep(0.6)
+            for cand in sorted(download_dir.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True):
+                try:
+                    resolved = str(cand.resolve())
+                    mtime = cand.stat().st_mtime
+                except Exception:
+                    continue
+                if resolved in known and mtime <= known[resolved]:
+                    continue
+                if min_mtime is not None and mtime < min_mtime:
+                    continue
+                if cand.with_suffix(cand.suffix + ".crdownload").exists():
+                    continue
+                try:
+                    size = cand.stat().st_size
+                except Exception:
+                    size = 0
+                if size <= 0:
+                    continue
+                return cand, size
+            time.sleep(0.5)
         return last, 0
 
     def export_now(self, download_dir: Path, timeout: int = 90) -> Tuple[Optional[Path], int]:
+        dl_dir = Path(download_dir)
+        dl_dir.mkdir(parents=True, exist_ok=True)
+
+        known: Dict[str, float] = {}
+        for existing in dl_dir.glob("*.xlsx"):
+            try:
+                known[str(existing.resolve())] = existing.stat().st_mtime
+            except Exception:
+                continue
+
+        for partial in dl_dir.glob("*.crdownload"):
+            try:
+                partial.unlink()
+            except Exception:
+                pass
+
+        start_mtime = time.time()
         if not self._click_export_button(timeout=min(timeout, 20)):
             return None, 0
         self._maybe_click_menu_item()
-        return self._wait_xlsx(Path(download_dir), timeout=timeout)
+        return self._wait_xlsx(dl_dir, timeout=timeout, known=known, min_mtime=start_mtime)
