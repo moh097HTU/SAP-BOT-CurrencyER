@@ -1,5 +1,5 @@
 selenium>=4.21
-webdriver-manager>=4.0.2
+pyvirtualdisplay>=3.0
 python-dotenv>=1.0.1
 fastapi>=0.111
 uvicorn[standard]>=0.30

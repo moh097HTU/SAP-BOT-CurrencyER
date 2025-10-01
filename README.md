@@ -16,5 +16,7 @@ git reset --hard origin/main
 ## Clean up untracked files & dirs (optional but ensures exact match)
 git clean -fd
 
-docker build -t sap-bot .
-docker run --rm -p 8000:8000 --env-file /path/to/clean.env -v $(pwd)/reports:/app/reports sap-bot
+docker build -t sap-bot:latest .
+docker run --rm -p 8000:8000 --env-file .env --shm-size=4g -v "${PWD}\reports:/app/reports" sap-bot:latest
+
+Import-Module PSReadLine
