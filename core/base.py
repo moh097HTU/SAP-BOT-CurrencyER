@@ -17,7 +17,7 @@ def fluent_wait(driver: WebDriver, timeout: float, poll: float = 0.25, ignored_e
 
 def _all_frames(driver: WebDriver):
     try:
-        return driver.find_elements(By.CSS_SELECTOR, "iframe, frame")
+            return driver.find_elements(By.CSS_SELECTOR, "iframe, frame")
     except Exception:
         return []
 

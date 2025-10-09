@@ -32,6 +32,7 @@ def run_delete_drafts_range(day_from: date, day_to: date) -> Dict[str, Any]:
     For each day in [day_from, day_to]:
       - open 'Currency Exchange Rates' app
       - set filter 'Exchange Rate Effective Date' to DD.MM.YYYY and press Enter
+      - wait for rows to load
       - (optionally pre-scroll) to trigger row rendering
       - delete all currently visible draft rows (one-by-one)
     Returns:
@@ -39,17 +40,7 @@ def run_delete_drafts_range(day_from: date, day_to: date) -> Dict[str, Any]:
         "ok": bool,
         "days_processed": int,
         "total_deleted": int,
-        "per_day": [
-          {
-            "date": "YYYY-MM-DD",
-            "deleted": int,
-            "attempts": int,
-            "sample": [ "<from->to @ date>", ... ],  # <= up to 10 items if your DraftFinder returns it
-            "ok": bool,
-            "why": "reason-if-any"
-          },
-          ...
-        ],
+        "per_day": [ ... ],
         "error": "...optional..."
       }
     """
@@ -102,19 +93,19 @@ def run_delete_drafts_range(day_from: date, day_to: date) -> Dict[str, Any]:
                 })
                 continue
 
+            # **NEW**: wait the table to (re)load rows (or settle to empty)
+            finder.wait_rows_loaded(timeout=20)
+
             # Light pre-scroll to help initial rows render
             finder.pre_scroll(times=2, settle=0.5)
 
             # Delete visible drafts
             sample: list[str] = []
             try:
-                # Prefer new triple-return signature if you added it:
-                #   deleted, attempts, sample = finder.delete_visible_drafts(...)
                 res = finder.delete_visible_drafts(per_click_timeout=16)
                 if isinstance(res, (list, tuple)) and len(res) >= 3:
                     deleted, attempts, sample = res[0], res[1], list(res[2])[:10]
                 else:
-                    # Backward compatibility with (deleted, attempts)
                     deleted, attempts = res  # type: ignore[misc]
                     sample = []
             except Exception as e:

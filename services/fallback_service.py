@@ -54,7 +54,6 @@ def _key_tuple(r: Dict[str, Any]) -> tuple:
     )
 
 def _rev_flip_tuple(r: Dict[str, Any]) -> tuple:
-    # reverse currencies, flip quotation
     q = _q_norm(r.get("Quotation"))
     flipped = "Direct" if q == "Indirect" else "Indirect"
     return (
@@ -65,23 +64,12 @@ def _rev_flip_tuple(r: Dict[str, Any]) -> tuple:
         flipped,
     )
 
-def _rev_same_tuple(r: Dict[str, Any]) -> tuple:
-    # reverse currencies, keep quotation (covers SAP exports that already present reverse-side)
-    return (
-        (r.get("ExchangeRateType") or "").strip().upper(),
-        (r.get("ValidFrom") or "").strip(),
-        (r.get("ToCurrency") or "").strip().upper(),
-        (r.get("FromCurrency") or "").strip().upper(),
-        _q_norm(r.get("Quotation")),
-    )
-
 def _json_missing_vs_excel(excel_rows: list[dict], json_rows: list[dict]) -> list[dict]:
     def _q_norm(q: str) -> str:
         q = (q or "").strip().lower()
         return "Indirect" if q.startswith("ind") else "Direct"
 
     def _key_tuple(r: dict) -> tuple:
-        # exact-direction key
         return (
             (r.get("ExchangeRateType") or "").strip().upper(),
             (r.get("ValidFrom") or "").strip(),
@@ -91,7 +79,6 @@ def _json_missing_vs_excel(excel_rows: list[dict], json_rows: list[dict]) -> lis
         )
 
     def _rev_flip_tuple(r: dict) -> tuple:
-        # opposite direction + flipped quotation (the only valid equivalence)
         q = _q_norm(r.get("Quotation"))
         flipped_q = "Direct" if q == "Indirect" else "Indirect"
         return (
@@ -102,7 +89,6 @@ def _json_missing_vs_excel(excel_rows: list[dict], json_rows: list[dict]) -> lis
             flipped_q,
         )
 
-    # Build presence set from Excel (exact + reverse+flipped only)
     excel_keys: set[tuple] = set()
     for er in excel_rows or []:
         try:
@@ -111,7 +97,6 @@ def _json_missing_vs_excel(excel_rows: list[dict], json_rows: list[dict]) -> lis
         except Exception:
             continue
 
-    # Anything in JSON not covered by those keys is missing
     missing: list[dict] = []
     for r in json_rows or []:
         k_exact = _key_tuple(r)
@@ -129,6 +114,9 @@ def _json_missing_vs_excel(excel_rows: list[dict], json_rows: list[dict]) -> lis
     return missing
 
 def _read_json_payload(day_iso: str) -> Tuple[List[Dict[str, Any]], bool]:
+    """
+    NEW: Always try to read WebService/data/<day>/exchange_rates_payload.json that the batch route writes.
+    """
     p = BASE_DATA_DIR / day_iso / "exchange_rates_payload.json"
     if not p.exists():
         return [], False
@@ -147,9 +135,6 @@ def _write_missing_tracker(day_iso: str, rows: List[Dict[str, Any]]) -> Path:
 
 # ---------- Excel parsing ----------
 def _parse_rate(val: Any) -> float | None:
-    """
-    Accept numbers or numeric strings like '1,234.56789'. Return float or None.
-    """
     if val is None:
         return None
     try:
@@ -161,11 +146,6 @@ def _parse_rate(val: Any) -> float | None:
         return None
 
 def _read_excel_rows(xlsx_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """
-    Parse SAP ListReport export and normalize rows.
-    IMPORTANT CHANGE: a row counts if it has type/date/from/to; quotation defaults to Direct;
-    rate is optional (may be None). This fixes undercounting (e.g., 378 vs 380).
-    """
     try:
         import openpyxl
     except ModuleNotFoundError as exc:
@@ -196,7 +176,6 @@ def _read_excel_rows(xlsx_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, A
         else:
             valid_from = str(vf_raw or "").strip()
 
-        # Prefer Currency Pair, else From/To
         frm, to = "", ""
         cp = get(r, "Currency Pair")
         if cp:
@@ -207,19 +186,17 @@ def _read_excel_rows(xlsx_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, A
             frm = str(get(r, "From Currency") or "").strip()
             to  = str(get(r, "To Currency") or "").strip()
 
-        # Normalize currency cells like "AED (United ...)" -> "AED"
         if frm:
             frm = frm.split(" ", 1)[0].split("(")[0].strip().upper()
         if to:
             to = to.split(" ", 1)[0].split("(")[0].strip().upper()
 
         qtn_raw = str(get(r, "Quotation") or "").strip()
-        quotation = "Indirect" if qtn_raw.lower().startswith("ind") else "Direct"  # default to Direct
+        quotation = "Indirect" if qtn_raw.lower().startswith("ind") else "Direct"
 
         rate_val = get(r, "Rate 1:1", "Rate (1:1)")
-        rate = _parse_rate(rate_val)  # optional
+        rate = _parse_rate(rate_val)
 
-        # NEW relaxed keep-condition: only key fields are required
         if not exch_code:
             skipped_reasons["no_type"] = skipped_reasons.get("no_type", 0) + 1
             continue
@@ -254,9 +231,9 @@ def run_collect_missing_range(day_from: date, day_to: date) -> Dict[str, Any]:
     """
     For each day in [day_from, day_to]:
       - open 'Currency Exchange Rates' app
-      - set date filter, export to Excel
+      - set date filter, wait rows loaded (NEW), export to Excel
       - parse xlsx + read JSON WebService/data/<YYYY-MM-DD>/exchange_rates_payload.json
-      - find JSON items missing from Excel (considering reverse pairs/quotation flip)
+      - find JSON items missing from Excel (consider reverse pairs/quotation flip)
       - write ALWAYS a tracker at WebService/TrackDrivers/Fallback/<YYYY-MM-DD>.json
     """
     cfg = config()
@@ -292,7 +269,6 @@ def run_collect_missing_range(day_from: date, day_to: date) -> Dict[str, Any]:
 
             ok = finder.set_effective_date_and_apply(day_ddmmyyyy, timeout=20)
             if not ok:
-                # Write empty tracker anyway so you have a breadcrumb
                 tracker_path = str(_write_missing_tracker(day_iso, []))
                 out["per_day"].append({
                     "date": day_iso, "ok": False, "why": "date_set_failed",
@@ -303,7 +279,18 @@ def run_collect_missing_range(day_from: date, day_to: date) -> Dict[str, Any]:
                 })
                 continue
 
-            xlsx_path, xlsx_size = exporter.export_now(download_dir=TEMP_DL_DIR, timeout=90)
+            # NEW: make sure table actually (re)rendered before exporting
+            finder.wait_rows_loaded(timeout=30)
+            finder.pre_scroll(times=2, settle=0.4)
+            wait_ui5_idle(drv, timeout=8)
+
+            # NEW: more robust export (longer timeout, purge partials, allow purge of stale .xlsx)
+            xlsx_path, xlsx_size = exporter.export_now(
+                download_dir=TEMP_DL_DIR,
+                timeout=180,
+                purge_old_xlsx=True,   # ensures the next .xlsx we see is from THIS export
+            )
+
             if not xlsx_path or not xlsx_path.exists() or xlsx_size == 0:
                 tracker_path = str(_write_missing_tracker(day_iso, []))
                 out["per_day"].append({
@@ -334,7 +321,6 @@ def run_collect_missing_range(day_from: date, day_to: date) -> Dict[str, Any]:
             json_rows, json_exists = _read_json_payload(day_iso)
             missing = _json_missing_vs_excel(excel_rows, json_rows)
 
-            # ALWAYS write a tracker (even when empty) so you can audit later.
             tracker_path = str(_write_missing_tracker(day_iso, missing))
 
             out["processed"] += 1

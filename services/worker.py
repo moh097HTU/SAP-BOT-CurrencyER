@@ -48,7 +48,42 @@ def _open_currency_app(drv) -> CurrencyExchangeRatesPage:
         raise RuntimeError("Shell home not detected after login")
     wait_ui5_idle(drv, timeout=30)
     wait_shell_search_ready(drv, timeout=30)
-    ShellSearch(drv).open_search().type_and_choose_app("Currency Exchange Rates")
+
+    from selenium.common.exceptions import StaleElementReferenceException
+    from services.ui import open_shell_search_via_js
+    import time
+
+    # Prefer FLP renderer JS (avoids stale header element)
+    opened_via_js = open_shell_search_via_js(drv)
+
+    attempts = 0
+    while attempts < 3:
+        attempts += 1
+        try:
+            if not opened_via_js:
+                # Fall back to DOM-based open if JS didn’t work
+                ShellSearch(drv).open_search()
+            # Type and choose app (this finds elements fresh each time)
+            ShellSearch(drv).type_and_choose_app("Currency Exchange Rates")
+            wait_ui5_idle(drv, timeout=30)
+            wait_url_contains(drv, "#Currency-maintainExchangeRates", 40)
+            page = CurrencyExchangeRatesPage(drv)
+            page.ensure_in_app(max_attempts=3, settle_each=8)
+            return page
+        except StaleElementReferenceException as e:
+            # brief settle & try again with a fresh DOM
+            time.sleep(0.5)
+            wait_ui5_idle(drv, timeout=10)
+            opened_via_js = open_shell_search_via_js(drv) or opened_via_js
+        except Exception:
+            # small backoff and retry once more
+            time.sleep(0.7)
+
+    # One last attempt after a slightly longer settle
+    time.sleep(1.2)
+    opened_via_js = open_shell_search_via_js(drv) or opened_via_js
+    ShellSearch(drv).open_search()
+    ShellSearch(drv).type_and_choose_app("Currency Exchange Rates")
     wait_ui5_idle(drv, timeout=30)
     wait_url_contains(drv, "#Currency-maintainExchangeRates", 40)
     page = CurrencyExchangeRatesPage(drv)
