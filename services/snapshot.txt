@@ -1,0 +1,3032 @@
+================  DIRECTORY TREE  ================
+services
+├── __init__.py
+├── auth.py
+├── commit.py
+├── config.py
+├── daily.py
+├── drafts_service.py
+├── driver.py
+├── fallback_service.py
+├── notify.py
+├── reporting.py
+├── runner.py
+├── safe.py
+├── schemas.py
+├── temp.ipynb
+├── tracking.py
+├── ui.py
+└── worker.py
+
+================  FILE CONTENTS  =================
+
+# auth.py
+
+from services.config import config
+from pages.Login.page import LoginPage
+from services.ui import wait_for_shell_home
+
+def login(driver) -> None:
+    cfg = config()
+    LoginPage(driver).login(cfg["SAP_USERNAME"], cfg["SAP_PASSWORD"])
+    # Let caller verify with wait_for_shell_home
+    wait_for_shell_home(driver, timeout=cfg["EXPLICIT_WAIT_SECONDS"])
+
+
+# commit.py
+
+from __future__ import annotations
+
+import os
+import threading
+from contextlib import contextmanager
+from typing import Any, Iterable
+
+# How many concurrent "Create/Activate" commits may run at once? Process-wide gate.
+_COMMIT_CONCURRENCY = max(1, int(os.getenv("COMMIT_CONCURRENCY", "1")))
+_GLOBAL_SEM = threading.Semaphore(_COMMIT_CONCURRENCY)
+
+# Per-key locks let us serialize only conflicting commits instead of the entire pool.
+_KEY_LOCKS: dict[str, tuple[threading.Lock, int]] = {}
+_KEY_LOCKS_GUARD = threading.Lock()
+
+
+def _normalize_key(key: Any) -> str | None:
+    """Turn various key shapes into a stable, case-insensitive token."""
+    if key is None:
+        return None
+    if hasattr(key, "dict"):
+        data = key.dict()
+        parts: Iterable[Any] = (
+            data.get("ExchangeRateType"),
+            data.get("FromCurrency"),
+            data.get("ToCurrency"),
+            data.get("ValidFrom"),
+        )
+    elif isinstance(key, dict):
+        parts = key.values()
+    elif isinstance(key, (list, tuple, set)):
+        parts = key
+    else:
+        parts = (key,)
+
+    normalized = [str(p).strip().upper() for p in parts if p is not None]
+    return "|".join(normalized) if normalized else None
+
+
+def _reserve_key_lock(key: str) -> threading.Lock:
+    with _KEY_LOCKS_GUARD:
+        if key in _KEY_LOCKS:
+            lock, refcount = _KEY_LOCKS[key]
+            _KEY_LOCKS[key] = (lock, refcount + 1)
+            return lock
+        lock = threading.Lock()
+        _KEY_LOCKS[key] = (lock, 1)
+        return lock
+
+
+def _release_key_lock(key: str, lock: threading.Lock) -> None:
+    with _KEY_LOCKS_GUARD:
+        stored = _KEY_LOCKS.get(key)
+        if not stored:
+            return
+        stored_lock, refcount = stored
+        if stored_lock is lock and refcount <= 1:
+            _KEY_LOCKS.pop(key, None)
+        else:
+            _KEY_LOCKS[key] = (stored_lock, max(1, refcount - 1))
+
+
+@contextmanager
+def commit_gate(key: Any = None):
+    """
+    Serialize the critical "commit" step in SAP.
+
+    When ``key`` is provided, only workers targeting the same key block one
+    another, while still respecting the global COMMIT_CONCURRENCY semaphore.
+    This keeps conflicting commits serialized without throttling unrelated ones.
+    """
+    normalized_key = _normalize_key(key)
+    key_lock: threading.Lock | None = None
+
+    try:
+        if normalized_key:
+            key_lock = _reserve_key_lock(normalized_key)
+            key_lock.acquire()
+
+        _GLOBAL_SEM.acquire()
+        try:
+            yield
+        finally:
+            _GLOBAL_SEM.release()
+    finally:
+        if normalized_key and key_lock:
+            key_lock.release()
+            _release_key_lock(normalized_key, key_lock)
+
+# config.py
+
+# services/config.py
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+_BOOL = {"1", "true", "yes", "on", "y", "t"}
+
+def _as_bool(v: str, default=False) -> bool:
+    if v is None:
+        return default
+    return v.strip().lower() in _BOOL
+
+def _as_int(v: str, default: int) -> int:
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+def config():
+    sap_url = os.getenv("SAP_URL", "https://my413369.s4hana.cloud.sap/ui#Shell-home")
+    return {
+        # SAP / browser
+        "SAP_URL": sap_url,
+        "ROOT_URL": sap_url,
+        "SAP_USERNAME": os.getenv("SAP_USERNAME", ""),
+        "SAP_PASSWORD": os.getenv("SAP_PASSWORD", ""),
+
+        "HEADLESS": _as_bool(os.getenv("HEADLESS", "false")),
+        "EXPLICIT_WAIT_SECONDS": _as_int(os.getenv("EXPLICIT_WAIT_SECONDS", "30"), 30),
+        "PAGELOAD_TIMEOUT_SECONDS": _as_int(os.getenv("PAGELOAD_TIMEOUT_SECONDS", "90"), 90),
+        "KEEP_BROWSER": _as_bool(os.getenv("KEEP_BROWSER", "true")),
+
+        # Multithreading / pacing
+        "NUM_WORKERS": _as_int(os.getenv("NUM_WORKERS", "4"), 4),
+        "LOGIN_CONCURRENCY": _as_int(os.getenv("LOGIN_CONCURRENCY", "2"), 2),
+        "WATCHDOG_SECONDS": _as_int(os.getenv("WATCHDOG_SECONDS", "2000"), 2000),
+        "CHROME_USER_DATA_BASE": os.getenv("CHROME_USER_DATA_BASE", "chrome_profile"),
+
+        # Reporting
+        "REPORTS_DIR": os.getenv("REPORTS_DIR", "reports"),
+        "DAILY_REPORTS_ENABLED": _as_bool(os.getenv("DAILY_REPORTS_ENABLED", "true")),
+        "NUM_LIVE_TRACKERS": _as_int(os.getenv("NUM_LIVE_TRACKERS", "8"), 8),  # keep last N live trackers
+
+        # Email (Outlook via Microsoft Graph)
+        "EMAIL_ENABLED": _as_bool(os.getenv("EMAIL_ENABLED", "false")),
+        "OUTLOOK_TENANT_ID": os.getenv("OUTLOOK_TENANT_ID", ""),
+        "OUTLOOK_CLIENT_ID": os.getenv("OUTLOOK_CLIENT_ID", ""),
+        "OUTLOOK_CLIENT_SECRET": os.getenv("OUTLOOK_CLIENT_SECRET", ""),
+        "OUTLOOK_SENDER": os.getenv("OUTLOOK_SENDER", ""),
+        "OUTLOOK_TO": os.getenv("OUTLOOK_TO", ""),
+        "OUTLOOK_CC": os.getenv("OUTLOOK_CC", ""),
+        "EMAIL_MAX_ATTACH_MB": _as_int(os.getenv("EMAIL_MAX_ATTACH_MB", "3"), 3),
+
+        # Legacy lock/ retry knobs (kept)
+        "LOCK_RETRY_MAX": _as_int(os.getenv("LOCK_RETRY_MAX", "3"), 3),
+        "LOCK_RETRY_DELAY_SEC": _as_int(os.getenv("LOCK_RETRY_DELAY_SEC", "8"), 8),
+
+        # Tracking
+        "TRACK_DIR": os.getenv("TRACK_DIR", "WebService/TrackDrivers"),
+
+        # Force-all-done loop
+        "FORCE_ALL_DONE_ENABLED": _as_bool(os.getenv("FORCE_ALL_DONE_ENABLED", "true")),
+        "FORCE_ALL_DONE_MAX_ROUNDS": _as_int(os.getenv("FORCE_ALL_DONE_MAX_ROUNDS", "25"), 25),
+        "FORCE_ALL_DONE_MAX_MINUTES": _as_int(os.getenv("FORCE_ALL_DONE_MAX_MINUTES", "60"), 60),
+        "FORCE_ALL_DONE_BASE_SLEEP_SEC": _as_int(os.getenv("FORCE_ALL_DONE_BASE_SLEEP_SEC", "8"), 8),
+
+        # Page commit flow
+        "LOCK_MAX_RETRIES": _as_int(os.getenv("LOCK_MAX_RETRIES", "3"), 3),
+    }
+
+# Legacy convenience
+ROOT_URL = config()["ROOT_URL"]
+EXPLICIT_WAIT_SEC = config()["EXPLICIT_WAIT_SECONDS"]
+
+
+# daily.py
+
+# services/daily.py
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict, Any, List
+import json
+from datetime import datetime
+
+from services.config import config
+from services.tracking import move_live_to_finished, prune_live_trackers_keep_last_n, finished_dir_for_day
+
+def finalize_batch_tracking(batch_id: str, track_dir: Path | None = None) -> Dict[str, Any]:
+    """
+    If batch is fully processed (no Pending), move its tracker to Finished/YYYY-MM-DD.
+    """
+    return move_live_to_finished(batch_id=batch_id, track_dir=track_dir)
+
+def prune_live_trackers(keep_n: int | None = None) -> Dict[str, Any]:
+    """
+    Prune live trackers, keeping at most keep_n (defaults to NUM_LIVE_TRACKERS or TRACK_LIVE_MAX or 10).
+    """
+    cfg = config()
+    default_keep = cfg.get("NUM_LIVE_TRACKERS", cfg.get("TRACK_LIVE_MAX", 10))
+    kn = keep_n if keep_n is not None else int(default_keep)
+    return prune_live_trackers_keep_last_n(keep_n=kn)
+
+def daily_rollup_collect(day: str | None = None) -> Dict[str, Any]:
+    """
+    Return a parsed list of rollup entries for a given day (default = today).
+    """
+    d = day or datetime.now().strftime("%Y-%m-%d")
+    from services.reporting import _reports_root  # local import to avoid cycle
+    path = _reports_root() / "daily" / d / "rollup.ndjson"
+    if not path.exists():
+        return {"ok": True, "day": d, "items": []}
+    items: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                items.append(json.loads(s))
+            except Exception:
+                pass
+    return {"ok": True, "day": d, "items": items}
+
+
+# drafts_service.py
+
+# services/drafts_service.py
+from __future__ import annotations
+
+import logging
+from datetime import date, timedelta
+from typing import Dict, Any
+
+from services.config import config
+from services.driver import get_driver
+from services.auth import login
+from services.ui import wait_for_shell_home, wait_ui5_idle
+from pages.Shell.Search.element import ShellSearch
+from pages.CurrencyExchangeRates.page import CurrencyExchangeRatesPage
+from pages.CurrencyExchangeRates.elements.DraftFinder import DraftFinder
+
+log = logging.getLogger("sapbot")
+
+
+def _ddmmyyyy(d: date) -> str:
+    return f"{d.day:02d}.{d.month:02d}.{d.year:04d}"
+
+
+def _daterange_inclusive(d0: date, d1: date):
+    cur = d0
+    while cur <= d1:
+        yield cur
+        cur += timedelta(days=1)
+
+
+def run_delete_drafts_range(day_from: date, day_to: date) -> Dict[str, Any]:
+    """
+    For each day in [day_from, day_to]:
+      - open 'Currency Exchange Rates' app
+      - set filter 'Exchange Rate Effective Date' to DD.MM.YYYY and press Enter
+      - wait for rows to load
+      - (optionally pre-scroll) to trigger row rendering
+      - delete all currently visible draft rows (one-by-one)
+    Returns:
+      {
+        "ok": bool,
+        "days_processed": int,
+        "total_deleted": int,
+        "per_day": [ ... ],
+        "error": "...optional..."
+      }
+    """
+    cfg = config()
+    drv = None
+    summary: Dict[str, Any] = {
+        "ok": False,
+        "days_processed": 0,
+        "total_deleted": 0,
+        "per_day": [],
+    }
+
+    try:
+        # Start browser + login + shell
+        drv = get_driver(headless=cfg["HEADLESS"])
+        login(drv)
+        wait_for_shell_home(drv, timeout=cfg["EXPLICIT_WAIT_SECONDS"])
+        wait_ui5_idle(drv, timeout=cfg["EXPLICIT_WAIT_SECONDS"])
+
+        # Navigate to app
+        ShellSearch(drv).open_search().type_and_choose_app("Currency Exchange Rates")
+        wait_ui5_idle(drv, timeout=30)
+        CurrencyExchangeRatesPage(drv).ensure_in_app(max_attempts=3, settle_each=8)
+
+        # Normalize range order
+        df = min(day_from, day_to)
+        dt = max(day_from, day_to)
+
+        total_deleted = 0
+        days_count = 0
+        per_day_stats = []
+
+        finder = DraftFinder(drv)
+
+        for day in _daterange_inclusive(df, dt):
+            days_count += 1
+            day_iso = str(day)          # YYYY-MM-DD for API consumers/logs
+            date_str = _ddmmyyyy(day)   # DD.MM.YYYY for UI filter
+
+            # Set date and apply
+            ok = finder.set_effective_date_and_apply(date_str, timeout=20)
+            if not ok:
+                per_day_stats.append({
+                    "date": day_iso,
+                    "deleted": 0,
+                    "attempts": 0,
+                    "sample": [],
+                    "ok": False,
+                    "why": "date_set_failed"
+                })
+                continue
+
+            # **NEW**: wait the table to (re)load rows (or settle to empty)
+            finder.wait_rows_loaded(timeout=20)
+
+            # Light pre-scroll to help initial rows render
+            finder.pre_scroll(times=2, settle=0.5)
+
+            # Delete visible drafts
+            sample: list[str] = []
+            try:
+                res = finder.delete_visible_drafts(per_click_timeout=16)
+                if isinstance(res, (list, tuple)) and len(res) >= 3:
+                    deleted, attempts, sample = res[0], res[1], list(res[2])[:10]
+                else:
+                    deleted, attempts = res  # type: ignore[misc]
+                    sample = []
+            except Exception as e:
+                log.error("[drafts] delete_visible_drafts failed for %s: %s: %s",
+                          day_iso, type(e).__name__, e)
+                per_day_stats.append({
+                    "date": day_iso,
+                    "deleted": 0,
+                    "attempts": 0,
+                    "sample": [],
+                    "ok": False,
+                    "why": f"delete_failed:{type(e).__name__}"
+                })
+                continue
+
+            total_deleted += int(deleted)
+            per_day_stats.append({
+                "date": day_iso,
+                "deleted": int(deleted),
+                "attempts": int(attempts),
+                "sample": sample or [],
+                "ok": True
+            })
+
+        summary.update(
+            ok=True,
+            days_processed=days_count,
+            total_deleted=total_deleted,
+            per_day=per_day_stats,
+        )
+        return summary
+
+    except Exception as e:
+        log.exception("[drafts] deletion run failed")
+        summary["error"] = f"{type(e).__name__}: {e}"
+        return summary
+    finally:
+        try:
+            if drv and not cfg.get("KEEP_BROWSER"):
+                drv.quit()
+        except Exception:
+            pass
+
+
+# driver.py
+
+# services/driver.py
+from __future__ import annotations
+import os, sys, threading, shutil, stat, time, random, gc, logging, platform
+from typing import Optional, List, Tuple
+from pathlib import Path
+from shutil import which
+
+# Make pyvirtualdisplay optional (Windows shouldn't require it)
+try:
+    from pyvirtualdisplay import Display  # type: ignore
+except Exception:  # ImportError or runtime issues
+    Display = None  # type: ignore
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import SessionNotCreatedException, WebDriverException
+
+from services.config import config  # if unused, keep to avoid breaking imports
+
+log = logging.getLogger("driver")
+if not log.handlers:
+    h = logging.StreamHandler()
+    h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    log.addHandler(h)
+log.setLevel(logging.INFO)
+
+# --- globals / env ---
+_DRIVER_PATH_CACHE: str | None = None
+_DRIVER_INIT_LOCK = threading.Lock()
+_PROFILE_SET_LOCK = threading.Lock()
+_PROFILE_DIRS_USED: set[str] = set()
+_VDISPLAY_LOCK = threading.Lock()
+_VDISPLAY: "Display | None" = None  # type: ignore
+
+# OS / env detection
+IS_WINDOWS = platform.system().lower().startswith("win")
+IS_LINUX = platform.system().lower() == "linux"
+
+def _is_docker() -> bool:
+    """Detect Docker via /.dockerenv or cgroup hints."""
+    if os.path.exists("/.dockerenv"):
+        return True
+    cgroup = "/proc/self/cgroup"
+    try:
+        if os.path.exists(cgroup):
+            txt = Path(cgroup).read_text(errors="ignore")
+            if "docker" in txt or "kubepods" in txt or "containerd" in txt:
+                return True
+    except Exception:
+        pass
+    return False
+
+IN_DOCKER = _is_docker()
+
+# Paths / timeouts
+CHROMEDRIVER_PATH_ENV = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
+PAGELOAD_TIMEOUT_DEFAULT = int(os.getenv("PAGELOAD_TIMEOUT_SECONDS", "90") or "90")
+
+# Profile base dirs (overrideable)
+LINUX_PROFILE_BASE_DEFAULT = "/home/appuser/chrome-profiles"
+WINDOWS_PROFILE_BASE_DEFAULT = str(Path.cwd() / "chrome_profile")
+CHROME_PROFILE_BASE = os.getenv(
+    "CHROME_PROFILE_BASE",
+    WINDOWS_PROFILE_BASE_DEFAULT if IS_WINDOWS else LINUX_PROFILE_BASE_DEFAULT,
+)
+
+def _ensure_virtual_display() -> None:
+    """
+    Start a virtual X display (Xvfb) when on Linux (bare metal or Docker).
+    Windows must not call this.
+    """
+    global _VDISPLAY
+    if _VDISPLAY is not None:
+        return
+    if not IS_LINUX:
+        return
+
+    with _VDISPLAY_LOCK:
+        if _VDISPLAY is not None:
+            return
+
+        # If the host already provides DISPLAY, don't force Xvfb unless requested.
+        force_xvfb = os.getenv("FORCE_XVFB", "1") != "0"
+        if not force_xvfb and os.environ.get("DISPLAY"):
+            log.info("DISPLAY is set; skipping virtual X display.")
+            return
+
+        if Display is None:
+            msg = (
+                "pyvirtualdisplay is not available but required for non-headless Chrome on Linux. "
+                "Install it (and Xvfb) or set DISPLAY, or run headless."
+            )
+            log.warning(msg)
+            return
+
+        try:
+            _VDISPLAY = Display(visible=0, size=(1920, 1080), color_depth=24)
+            _VDISPLAY.start()
+            os.environ["DISPLAY"] = getattr(_VDISPLAY, "new_display_var", os.environ.get("DISPLAY", ":99"))
+            log.info("Virtual X display started at %s (docker=%s)", os.environ["DISPLAY"], IN_DOCKER)
+        except Exception as e:
+            log.warning("Failed to start virtual X display: %s", e)
+
+def _register_profile_dir(p: str) -> None:
+    with _PROFILE_SET_LOCK:
+        _PROFILE_DIRS_USED.add(p)
+
+def list_profile_dirs_used() -> List[str]:
+    with _PROFILE_SET_LOCK:
+        return list(_PROFILE_DIRS_USED)
+
+def _unique_profile_dir(base_dir: Optional[str] = None) -> str:
+    base_root = base_dir or CHROME_PROFILE_BASE
+    base = Path(base_root)
+    base.mkdir(parents=True, exist_ok=True)
+    d = base / f"w-{os.getpid()}-{time.time_ns()}"
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(d, 0o700)
+    except Exception:
+        pass
+    p = str(d.resolve())
+    _register_profile_dir(p)
+    return p
+
+def _strip_arg(options: Options, prefix: str) -> None:
+    try:
+        keep = [a for a in options.arguments if not a.startswith(prefix)]
+        options._arguments = keep  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+def _create_service() -> Service:
+    """
+    Windows: Prefer Selenium Manager when chromedriver isn't pinned.
+    Linux/Docker: keep your pinned path by default, but fall back to Selenium Manager if missing.
+    """
+    explicit = CHROMEDRIVER_PATH_ENV if CHROMEDRIVER_PATH_ENV else None
+    if explicit and os.path.isfile(explicit):
+        return Service(executable_path=explicit)
+    found = which("chromedriver")
+    if found:
+        return Service(executable_path=found)
+    log.warning("chromedriver not found in env/PATH; using Selenium Manager to resolve ChromeDriver.")
+    return Service()  # Selenium Manager
+
+def _random_debug_port() -> int:
+    return random.randint(9223, 9720)
+
+# --- download helpers -------------------------------------------------
+
+def _default_download_dir() -> Path:
+    """Resolve a sane platform-specific Downloads directory."""
+    # Allow env override first
+    env = os.getenv("DOWNLOAD_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    home = Path.home()
+    # Windows: %USERPROFILE%\Downloads ; Linux: ~/Downloads
+    cand = home / "Downloads"
+    try:
+        cand.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        # Fallback to cwd if we somehow cannot create Downloads
+        cand = Path.cwd() / "downloads"
+        cand.mkdir(parents=True, exist_ok=True)
+    return cand.resolve()
+
+def _chrome_prefs(download_dir: Path) -> dict:
+    dl = str(download_dir)
+    return {
+        "download.default_directory": dl,
+        "download.prompt_for_download": False,
+        "download.directory_upgrade": True,
+        "safebrowsing.enabled": True,
+        # make PDFs download rather than open in tab (prevents hijacking)
+        "plugins.always_open_pdf_externally": True,
+        "download.open_pdf_in_system_reader": False,
+        # allow multiple automatic downloads
+        "profile.default_content_setting_values.automatic_downloads": 1,
+        # some S4/HANA exports use blob URLs; this helps avoid nags
+        "profile.default_content_setting_values.popups": 0,
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False,
+    }
+
+def _base_options(download_dir: Optional[str]) -> Tuple[Options, Path]:
+    opts = Options()
+
+    # Window geometry: single, consistent value
+    opts.add_argument("--window-size=1536,870")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-extensions")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-features=Translate,BackForwardCache,Prerender2,VizDisplayCompositor")
+    opts.add_argument("--lang=en-US")
+    opts.add_argument("--no-first-run")
+    opts.add_argument("--no-default-browser-check")
+    opts.add_argument("--log-level=3")
+    opts.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+    opts.add_experimental_option("useAutomationExtension", False)
+
+    ua = os.getenv("CHROME_UA")
+    if ua:
+        opts.add_argument(f"user-agent={ua}")
+
+    # Decide the download directory (always set one)
+    dl_dir = Path(download_dir).expanduser().resolve() if download_dir else _default_download_dir()
+    try:
+        dl_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        log.warning("Failed to create download dir %s: %s; falling back to default", dl_dir, e)
+        dl_dir = _default_download_dir()
+
+    prefs = _chrome_prefs(dl_dir)
+    opts.add_experimental_option("prefs", prefs)
+
+    try:
+        opts.add_argument(f"--remote-debugging-port={_random_debug_port()}")
+    except Exception:
+        pass
+
+    # Respect HEADLESS if you later want it (still defaulting to non-headless)
+    if os.getenv("HEADLESS", "0") == "1":
+        # modern headless
+        opts.add_argument("--headless=new")
+    return opts, dl_dir
+
+def _start_with(service: Service, options: Options, user_data_dir: Optional[str], timeout_s: int, download_dir: Path):
+    _strip_arg(options, "--user-data-dir")
+    _strip_arg(options, "--profile-directory")
+    if user_data_dir:
+        options.add_argument(f"--user-data-dir={user_data_dir}")
+        options.add_argument(f"--profile-directory=Profile-{int(time.time()*1000)%1000000}")
+
+    platform_tag = "windows" if IS_WINDOWS else ("linux-docker" if IN_DOCKER else "linux")
+    log.info(
+        "Launching Chrome (non-headless) | platform=%s | user_data_dir=%s | args=%s | downloads=%s",
+        platform_tag, user_data_dir, options.arguments, download_dir
+    )
+
+    drv = webdriver.Chrome(service=service, options=options)
+    drv.set_page_load_timeout(timeout_s)
+
+    # CDP: allow downloads explicitly (helps with some blob-based flows)
+    try:
+        drv.execute_cdp_cmd("Page.setDownloadBehavior", {
+            "behavior": "allow",
+            "downloadPath": str(download_dir)
+        })
+    except Exception:
+        pass
+
+    try:
+        # Anti-detection: remove webdriver flag
+        drv.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"}
+        )
+    except Exception:
+        pass
+    return drv
+
+def ensure_driver_binary_ready() -> str:
+    """
+    Kept for backward compatibility. On Windows, you likely rely on Selenium Manager;
+    on Linux/Docker we honor pinned path when present.
+    """
+    global _DRIVER_PATH_CACHE
+    if _DRIVER_PATH_CACHE:
+        return _DRIVER_PATH_CACHE
+    with _DRIVER_INIT_LOCK:
+        if _DRIVER_PATH_CACHE:
+            return _DRIVER_PATH_CACHE
+
+        path = which("chromedriver")
+        if not path:
+            path = CHROMEDRIVER_PATH_ENV
+
+        if path and os.path.isfile(path):
+            _DRIVER_PATH_CACHE = path
+            return _DRIVER_PATH_CACHE
+
+        if IS_WINDOWS:
+            log.warning("chromedriver not found; Windows will use Selenium Manager dynamically.")
+            _DRIVER_PATH_CACHE = ""
+            return _DRIVER_PATH_CACHE
+
+        raise RuntimeError(
+            f"chromedriver not found at '{path}'. Ensure Dockerfile baked it or allow Selenium Manager."
+        )
+
+def get_driver(headless: bool = False, download_dir: Optional[str] = None) -> webdriver.Chrome:
+    """
+    Cross-platform launcher:
+      - Linux (bare metal or Docker): non-headless via Xvfb (if available).
+      - Windows: non-headless directly.
+    """
+    if IS_LINUX:
+        _ensure_virtual_display()
+
+    svc = _create_service()
+    opts, dl_dir = _base_options(download_dir)
+    timeout_s = PAGELOAD_TIMEOUT_DEFAULT
+
+    # Try with unique profile dir 1
+    p1 = _unique_profile_dir()
+    try:
+        return _start_with(svc, opts, p1, timeout_s, dl_dir)
+    except SessionNotCreatedException as e:
+        msg = str(e).lower()
+        log.warning("Attempt#1 failed: %s", msg[:300])
+        _cleanup_dir_silent(p1)
+        if "user data directory is already in use" not in msg:
+            raise _wrap_session_error(e)
+    except WebDriverException as e:
+        if IS_LINUX and "chrome not reachable" in str(e).lower():
+            log.warning("Chrome not reachable — verify Xvfb/DISPLAY and /dev/shm size.")
+        _cleanup_dir_silent(p1)
+        raise
+
+    # Try with unique profile dir 2
+    p2 = _unique_profile_dir()
+    try:
+        return _start_with(svc, opts, p2, timeout_s, dl_dir)
+    except SessionNotCreatedException as e:
+        msg = str(e).lower()
+        log.warning("Attempt#2 failed: %s", msg[:300])
+        _cleanup_dir_silent(p2)
+        if "user data directory is already in use" not in msg:
+            raise _wrap_session_error(e)
+
+    # Last attempt: no user-data-dir (ephemeral)
+    log.warning("Attempt#3: starting WITHOUT user-data-dir (ephemeral tmp profile)")
+    return _start_with(svc, opts, user_data_dir=None, timeout_s=timeout_s, download_dir=dl_dir)
+
+def _wrap_session_error(e: Exception) -> RuntimeError:
+    return RuntimeError(
+        "Failed to create Chrome session after fallbacks. "
+        "Check chromedriver match, /dev/shm size, virtual display (Linux), and conflicting args. "
+        f"Original: {type(e).__name__}: {e}"
+    )
+
+def _on_rm_error(func, path, exc_info):
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except Exception:
+        pass
+    try:
+        func(path)
+    except Exception:
+        pass
+
+def _rmtree_force(p: Path, retries: int = 3, delay: float = 0.25):
+    for _ in range(max(1, retries)):
+        try:
+            if p.exists():
+                shutil.rmtree(p, onerror=_on_rm_error)
+            return
+        except Exception:
+            time.sleep(delay)
+    try:
+        if p.exists():
+            shutil.rmtree(p, onerror=_on_rm_error)
+    except Exception:
+        pass
+
+def _cleanup_dir_silent(path_str: str):
+    try:
+        _rmtree_force(Path(path_str))
+    except Exception:
+        pass
+
+def cleanup_profiles(also_base: bool = True) -> dict:
+    deleted, errors = [], []
+    with _PROFILE_SET_LOCK:
+        dirs = list(_PROFILE_DIRS_USED)
+        _PROFILE_DIRS_USED.clear()
+    for d in dirs:
+        try:
+            _rmtree_force(Path(d))
+            deleted.append(d)
+        except Exception as e:
+            errors.append({"dir": d, "error": f"{type(e).__name__}: {e}"})
+
+    base = Path(CHROME_PROFILE_BASE)
+    if also_base:
+        try:
+            if base.exists() and base.is_dir() and not any(base.iterdir()):
+                _rmtree_force(base)
+        except Exception:
+            pass
+
+    gc.collect()
+    return {"deleted": deleted, "errors": errors}
+
+# --- optional: exact viewport helper ----------------------------------
+
+def set_exact_viewport(driver: webdriver.Chrome, vw: int, vh: int) -> None:
+    """Resize outer window so that viewport equals (vw, vh)."""
+    try:
+        inner_w, inner_h = driver.execute_script("return [window.innerWidth, window.innerHeight];")
+        outer = driver.get_window_size()
+        chrome_w = outer["width"] - inner_w
+        chrome_h = outer["height"] - inner_h
+        driver.set_window_size(vw + chrome_w, vh + chrome_h)
+    except Exception as e:
+        log.debug("set_exact_viewport failed: %s", e)
+
+
+# fallback_service.py
+
+# services/fallback_service.py
+from __future__ import annotations
+
+import json
+import logging
+from datetime import date, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+from services.config import config
+from services.driver import get_driver
+from services.auth import login
+from services.ui import wait_for_shell_home, wait_ui5_idle
+from pages.Shell.Search.element import ShellSearch
+from pages.CurrencyExchangeRates.page import CurrencyExchangeRatesPage
+from pages.CurrencyExchangeRates.elements.DraftFinder import DraftFinder
+from pages.CurrencyExchangeRates.elements.ExcelExport.element import ExcelExporter
+
+log = logging.getLogger("sapbot")
+
+# ---------- formatting helpers ----------
+def _ddmmyyyy(d: date) -> str:
+    return f"{d.day:02d}.{d.month:02d}.{d.year:04d}"
+
+def _iso(d: date) -> str:
+    return d.strftime("%Y-%m-%d")
+
+def _daterange_inclusive(d0: date, d1: date):
+    cur = min(d0, d1)
+    end = max(d0, d1)
+    while cur <= end:
+        yield cur
+        cur = cur + timedelta(days=1)
+
+# ---------- IO helpers ----------
+BASE_DATA_DIR = Path("WebService") / "data"
+FALLBACK_TRACK_DIR = Path("WebService") / "TrackDrivers" / "Fallback"
+TEMP_DL_DIR = Path(config().get("REPORTS_DIR") or "reports") / "tmp_downloads"
+TEMP_DL_DIR.mkdir(parents=True, exist_ok=True)
+FALLBACK_TRACK_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------- comparison helpers ----------
+def _q_norm(q: str | None) -> str:
+    s = (q or "").strip().lower()
+    return "Indirect" if s.startswith("ind") else "Direct"
+
+def _key_tuple(r: Dict[str, Any]) -> tuple:
+    return (
+        (r.get("ExchangeRateType") or "").strip().upper(),
+        (r.get("ValidFrom") or "").strip(),
+        (r.get("FromCurrency") or "").strip().upper(),
+        (r.get("ToCurrency") or "").strip().upper(),
+        _q_norm(r.get("Quotation")),
+    )
+
+def _rev_flip_tuple(r: Dict[str, Any]) -> tuple:
+    q = _q_norm(r.get("Quotation"))
+    flipped = "Direct" if q == "Indirect" else "Indirect"
+    return (
+        (r.get("ExchangeRateType") or "").strip().upper(),
+        (r.get("ValidFrom") or "").strip(),
+        (r.get("ToCurrency") or "").strip().upper(),
+        (r.get("FromCurrency") or "").strip().upper(),
+        flipped,
+    )
+
+def _json_missing_vs_excel(excel_rows: list[dict], json_rows: list[dict]) -> list[dict]:
+    def _q_norm(q: str) -> str:
+        q = (q or "").strip().lower()
+        return "Indirect" if q.startswith("ind") else "Direct"
+
+    def _key_tuple(r: dict) -> tuple:
+        return (
+            (r.get("ExchangeRateType") or "").strip().upper(),
+            (r.get("ValidFrom") or "").strip(),
+            (r.get("FromCurrency") or "").strip().upper(),
+            (r.get("ToCurrency") or "").strip().upper(),
+            _q_norm(r.get("Quotation")),
+        )
+
+    def _rev_flip_tuple(r: dict) -> tuple:
+        q = _q_norm(r.get("Quotation"))
+        flipped_q = "Direct" if q == "Indirect" else "Indirect"
+        return (
+            (r.get("ExchangeRateType") or "").strip().upper(),
+            (r.get("ValidFrom") or "").strip(),
+            (r.get("ToCurrency") or "").strip().upper(),
+            (r.get("FromCurrency") or "").strip().upper(),
+            flipped_q,
+        )
+
+    excel_keys: set[tuple] = set()
+    for er in excel_rows or []:
+        try:
+            excel_keys.add(_key_tuple(er))
+            excel_keys.add(_rev_flip_tuple(er))
+        except Exception:
+            continue
+
+    missing: list[dict] = []
+    for r in json_rows or []:
+        k_exact = _key_tuple(r)
+        k_rev   = _rev_flip_tuple(r)
+        if k_exact in excel_keys or k_rev in excel_keys:
+            continue
+        missing.append({
+            "ExchangeRateType": (r.get("ExchangeRateType") or "").strip().upper(),
+            "FromCurrency": (r.get("FromCurrency") or "").strip().upper(),
+            "ToCurrency": (r.get("ToCurrency") or "").strip().upper(),
+            "ValidFrom": (r.get("ValidFrom") or "").strip(),
+            "Quotation": _q_norm(r.get("Quotation")),
+            "ExchangeRate": r.get("ExchangeRate"),
+        })
+    return missing
+
+def _read_json_payload(day_iso: str) -> Tuple[List[Dict[str, Any]], bool]:
+    """
+    NEW: Always try to read WebService/data/<day>/exchange_rates_payload.json that the batch route writes.
+    """
+    p = BASE_DATA_DIR / day_iso / "exchange_rates_payload.json"
+    if not p.exists():
+        return [], False
+    try:
+        rows = json.loads(p.read_text(encoding="utf-8"))
+        out: List[Dict[str, Any]] = [r for r in (rows or []) if isinstance(r, dict)]
+        return out, True
+    except Exception:
+        return [], True
+
+def _write_missing_tracker(day_iso: str, rows: List[Dict[str, Any]]) -> Path:
+    out_path = FALLBACK_TRACK_DIR / f"{day_iso}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out_path
+
+# ---------- Excel parsing ----------
+def _parse_rate(val: Any) -> float | None:
+    if val is None:
+        return None
+    try:
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip().replace(",", "")
+        return float(s) if s else None
+    except Exception:
+        return None
+
+def _read_excel_rows(xlsx_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    try:
+        import openpyxl
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("openpyxl is required for Excel fallback parsing; install it via 'pip install openpyxl'.") from exc
+
+    wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+    ws = wb.active
+
+    header_cells = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+    headers = {(str(v).strip() if v is not None else ""): i for i, v in enumerate(header_cells)}
+
+    def get(row_vals, name, *alts):
+        for key in (name, *alts):
+            if key in headers:
+                return row_vals[headers[key]]
+        return None
+
+    rows: List[Dict[str, Any]] = []
+    skipped_reasons: Dict[str, int] = {}
+
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        exch_lbl = str(get(r, "Exchange Rate Type") or "").strip()
+        exch_code = exch_lbl[:1].upper() if exch_lbl else ""
+
+        vf_raw = get(r, "Valid From")
+        if hasattr(vf_raw, "strftime"):
+            valid_from = vf_raw.strftime("%d.%m.%Y")
+        else:
+            valid_from = str(vf_raw or "").strip()
+
+        frm, to = "", ""
+        cp = get(r, "Currency Pair")
+        if cp:
+            cp = str(cp).strip()
+            frm, to = (cp.split("/", 1) + [""])[:2] if "/" in cp else (cp, "")
+            frm, to = (frm or "").strip(), (to or "").strip()
+        else:
+            frm = str(get(r, "From Currency") or "").strip()
+            to  = str(get(r, "To Currency") or "").strip()
+
+        if frm:
+            frm = frm.split(" ", 1)[0].split("(")[0].strip().upper()
+        if to:
+            to = to.split(" ", 1)[0].split("(")[0].strip().upper()
+
+        qtn_raw = str(get(r, "Quotation") or "").strip()
+        quotation = "Indirect" if qtn_raw.lower().startswith("ind") else "Direct"
+
+        rate_val = get(r, "Rate 1:1", "Rate (1:1)")
+        rate = _parse_rate(rate_val)
+
+        if not exch_code:
+            skipped_reasons["no_type"] = skipped_reasons.get("no_type", 0) + 1
+            continue
+        if not valid_from:
+            skipped_reasons["no_date"] = skipped_reasons.get("no_date", 0) + 1
+            continue
+        if not frm or not to:
+            skipped_reasons["no_pair"] = skipped_reasons.get("no_pair", 0) + 1
+            continue
+
+        rows.append({
+            "ExchangeRateType": exch_code,
+            "ValidFrom": valid_from,
+            "FromCurrency": frm,
+            "ToCurrency": to,
+            "Quotation": quotation,
+            "ExchangeRate": rate,  # may be None
+        })
+
+    diag = {
+        "sheet_title": ws.title,
+        "n_cols": len(header_cells),
+        "headers": list(headers.keys()),
+        "n_rows_parsed": len(rows),
+        "file_bytes": xlsx_path.stat().st_size if xlsx_path.exists() else 0,
+        "skipped_reasons": skipped_reasons,
+    }
+    return rows, diag
+
+# ---------- main runner ----------
+def run_collect_missing_range(day_from: date, day_to: date) -> Dict[str, Any]:
+    """
+    For each day in [day_from, day_to]:
+      - open 'Currency Exchange Rates' app
+      - set date filter, wait rows loaded (NEW), export to Excel
+      - parse xlsx + read JSON WebService/data/<YYYY-MM-DD>/exchange_rates_payload.json
+      - find JSON items missing from Excel (consider reverse pairs/quotation flip)
+      - write ALWAYS a tracker at WebService/TrackDrivers/Fallback/<YYYY-MM-DD>.json
+    """
+    cfg = config()
+    drv = None
+
+    out: Dict[str, Any] = {
+        "ok": True,
+        "total_days": 0,
+        "processed": 0,
+        "total_missing": 0,
+        "per_day": [],
+    }
+
+    try:
+        TEMP_DL_DIR.mkdir(parents=True, exist_ok=True)
+
+        drv = get_driver(headless=cfg["HEADLESS"], download_dir=str(TEMP_DL_DIR))
+        login(drv)
+        wait_for_shell_home(drv, timeout=cfg["EXPLICIT_WAIT_SECONDS"])
+        wait_ui5_idle(drv, timeout=cfg["EXPLICIT_WAIT_SECONDS"])
+
+        ShellSearch(drv).open_search().type_and_choose_app("Currency Exchange Rates")
+        wait_ui5_idle(drv, timeout=30)
+        CurrencyExchangeRatesPage(drv).ensure_in_app(max_attempts=3, settle_each=8)
+
+        finder = DraftFinder(drv)
+        exporter = ExcelExporter(drv)
+
+        for d in _daterange_inclusive(day_from, day_to):
+            out["total_days"] += 1
+            day_iso = _iso(d)
+            day_ddmmyyyy = _ddmmyyyy(d)
+
+            ok = finder.set_effective_date_and_apply(day_ddmmyyyy, timeout=20)
+            if not ok:
+                tracker_path = str(_write_missing_tracker(day_iso, []))
+                out["per_day"].append({
+                    "date": day_iso, "ok": False, "why": "date_set_failed",
+                    "excel_rows": 0, "json_rows": 0, "missing": 0,
+                    "tracker_path": tracker_path, "export_clicked": False,
+                    "xlsx_path": "", "xlsx_size": 0, "headers_seen": [],
+                    "json_file_exists": False,
+                })
+                continue
+
+            # NEW: make sure table actually (re)rendered before exporting
+            finder.wait_rows_loaded(timeout=30)
+            finder.pre_scroll(times=2, settle=0.4)
+            wait_ui5_idle(drv, timeout=8)
+
+            # NEW: more robust export (longer timeout, purge partials, allow purge of stale .xlsx)
+            xlsx_path, xlsx_size = exporter.export_now(
+                download_dir=TEMP_DL_DIR,
+                timeout=180,
+                purge_old_xlsx=True,   # ensures the next .xlsx we see is from THIS export
+            )
+
+            if not xlsx_path or not xlsx_path.exists() or xlsx_size == 0:
+                tracker_path = str(_write_missing_tracker(day_iso, []))
+                out["per_day"].append({
+                    "date": day_iso, "ok": False, "why": "excel_export_failed",
+                    "excel_rows": 0, "json_rows": 0, "missing": 0,
+                    "tracker_path": tracker_path, "export_clicked": True,
+                    "xlsx_path": str(xlsx_path) if xlsx_path else "",
+                    "xlsx_size": xlsx_size, "headers_seen": [],
+                    "json_file_exists": False,
+                })
+                continue
+
+            try:
+                excel_rows, diag = _read_excel_rows(xlsx_path)
+                headers_seen = diag.get("headers", [])
+                skipped_reasons = diag.get("skipped_reasons", {})
+            except Exception as e:
+                tracker_path = str(_write_missing_tracker(day_iso, []))
+                out["per_day"].append({
+                    "date": day_iso, "ok": False, "why": f"excel_parse_failed: {type(e).__name__}: {e}",
+                    "excel_rows": 0, "json_rows": 0, "missing": 0,
+                    "tracker_path": tracker_path, "export_clicked": True,
+                    "xlsx_path": str(xlsx_path), "xlsx_size": xlsx_size,
+                    "headers_seen": [], "json_file_exists": False,
+                })
+                continue
+
+            json_rows, json_exists = _read_json_payload(day_iso)
+            missing = _json_missing_vs_excel(excel_rows, json_rows)
+
+            tracker_path = str(_write_missing_tracker(day_iso, missing))
+
+            out["processed"] += 1
+            out["total_missing"] += len(missing)
+            out["per_day"].append({
+                "date": day_iso, "ok": True, "why": "",
+                "excel_rows": len(excel_rows), "json_rows": len(json_rows),
+                "missing": len(missing), "tracker_path": tracker_path,
+                "export_clicked": True,
+                "xlsx_path": str(xlsx_path), "xlsx_size": xlsx_size,
+                "headers_seen": headers_seen, "skipped_reasons": skipped_reasons,
+                "json_file_exists": json_exists,
+            })
+
+        return out
+
+    except Exception as e:
+        log.exception("[fallback] collect-missing failed")
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", **out}
+    finally:
+        try:
+            if drv and not cfg.get("KEEP_BROWSER"):
+                drv.quit()
+        except Exception:
+            pass
+
+
+# notify.py
+
+# services/notify.py
+from __future__ import annotations
+
+import base64
+import json
+import os
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+
+from services.config import config
+
+GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+_SCOPES = ["https://graph.microsoft.com/.default"]
+
+def _split_csv(s: str) -> list[str]:
+    return [x.strip() for x in s.split(",") if x.strip()]
+
+def _get_token() -> str:
+    """
+    Acquire an app-only token using MSAL (client credentials).
+    Import msal lazily so the project runs even if emailing is disabled.
+    """
+    cfg = config()
+    try:
+        import msal
+    except Exception as e:
+        raise RuntimeError("Emailing is enabled but 'msal' is not installed.") from e
+
+    app = msal.ConfidentialClientApplication(
+        client_id=cfg["OUTLOOK_CLIENT_ID"],
+        authority=f"https://login.microsoftonline.com/{cfg['OUTLOOK_TENANT_ID']}",
+        client_credential=cfg["OUTLOOK_CLIENT_SECRET"],
+    )
+    result = app.acquire_token_silent(_SCOPES, account=None)
+    if not result:
+        result = app.acquire_token_for_client(scopes=_SCOPES)
+    if not result or "access_token" not in result:
+        raise RuntimeError(f"Could not acquire Graph token: {result}")
+    return result["access_token"]
+
+def _file_attachment_dict(path: Path, max_mb: int) -> Optional[Dict[str, Any]]:
+    """
+    Build Graph fileAttachment payload for files up to max_mb (simple attach limit).
+    Returns None if too large or missing.
+    """
+    try:
+        if not path.exists() or not path.is_file():
+            return None
+        size = path.stat().st_size
+        if size > max_mb * 1024 * 1024:
+            return None
+        content = path.read_bytes()
+        return {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": path.name,
+            "contentBytes": base64.b64encode(content).decode("ascii"),
+        }
+    except Exception:
+        return None
+
+def _build_html_body(batch_id: str,
+                     received_count: int,
+                     created_count: int,
+                     failed_rows: List[Dict[str, Any]],
+                     duration_sec: Optional[float]) -> str:
+    rows = []
+    for r in failed_rows:
+        p = r.get("payload", {})
+        err = r.get("error") or r.get("dialog_text") or ""
+        rows.append(f"""
+          <tr>
+            <td>{r.get('index','')}</td>
+            <td>{p.get('ExchangeRateType','')}</td>
+            <td>{p.get('FromCurrency','')}</td>
+            <td>{p.get('ToCurrency','')}</td>
+            <td>{p.get('ValidFrom','')}</td>
+            <td>{p.get('Quotation','')}</td>
+            <td>{p.get('ExchangeRate','')}</td>
+            <td>{r.get('status','')}</td>
+            <td>{(err or '').replace('<','&lt;').replace('>','&gt;')}</td>
+          </tr>
+        """)
+    rows_html = "\n".join(rows) or "<tr><td colspan='10'>—</td></tr>"
+    dur = f"{duration_sec:.1f}s" if duration_sec is not None else "n/a"
+    created_pct = f"{(created_count/received_count*100):.1f}%" if received_count else "n/a"
+    return f"""
+    <div style="font-family:Segoe UI,Arial,sans-serif">
+      <h2>[SAP-BOT] Batch {batch_id} completed</h2>
+      <p><b>Received:</b> {received_count} &nbsp;|&nbsp; <b>Created:</b> {created_count} ({created_pct}) &nbsp;|&nbsp; <b>Failed:</b> {len(failed_rows)} &nbsp;|&nbsp; <b>Duration:</b> {dur}</p>
+      <h3>Failures</h3>
+      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr>
+            <th>#</th><th>Type</th><th>From</th><th>To</th><th>Date</th>
+            <th>Quotation</th><th>Rate</th><th>Status</th><th>Error</th>
+          </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+      </table>
+      <p style="margin-top:12px">Full JSON/CSV attached. attached when size allowed; if any were too large, their paths are listed in the table.</p>
+    </div>
+    """
+
+def send_batch_email(
+    batch_id: str,
+    received_count: int,
+    result_obj: Dict[str, Any],
+    failed_rows: List[Dict[str, Any]],
+    attachment_paths: List[str],
+    duration_sec: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Sends a summary email via Microsoft Graph to OUTLOOK_TO/CC.
+    attachment_paths: list of files to attach (failed json/csv).
+    Returns a dict with 'ok' and 'attached' lists.
+    """
+    cfg = config()
+    if not cfg.get("EMAIL_ENABLED"):
+        return {"ok": False, "reason": "email_disabled"}
+
+    # Prepare recipients
+    to_list = _split_csv(cfg.get("OUTLOOK_TO", ""))
+    if not to_list:
+        return {"ok": False, "reason": "no_to_recipients"}
+    cc_list = _split_csv(cfg.get("OUTLOOK_CC", ""))
+
+    # Subject/body
+    created_count = int(result_obj.get("created", 0))
+    subject = f"[SAP-BOT] Batch {batch_id}: {created_count}/{received_count} created – {len(failed_rows)} failed"
+    html_body = _build_html_body(batch_id, received_count, created_count, failed_rows, duration_sec)
+
+    # Build attachments (respect simple attach size)
+    max_mb = int(cfg.get("EMAIL_MAX_ATTACH_MB") or 3)
+    attached = []
+    attachments = []
+    for p in attachment_paths:
+        att = _file_attachment_dict(Path(p), max_mb=max_mb)
+        if att:
+            attachments.append(att)
+            attached.append(os.path.basename(p))
+    # Graph API payload
+    message = {
+        "subject": subject,
+        "body": {"contentType": "HTML", "content": html_body},
+        "toRecipients": [{"emailAddress": {"address": a}} for a in to_list],
+    }
+    if cc_list:
+        message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc_list]
+    if attachments:
+        message["attachments"] = attachments
+
+    # Send
+    token = _get_token()
+    import requests  
+    sender_upn = cfg["OUTLOOK_SENDER"] or to_list[0]  # fallback
+    url = f"{GRAPH_BASE}/users/{sender_upn}/sendMail"
+    resp = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        data=json.dumps({"message": message, "saveToSentItems": True}),
+        timeout=30,
+    )
+    if resp.status_code not in (202, 200):
+        return {"ok": False, "reason": f"graph_send_failed {resp.status_code}: {resp.text}"}
+
+    return {"ok": True, "attached": attached, "to": to_list, "cc": cc_list}
+
+
+# reporting.py
+
+# services/reporting.py
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, List
+import json
+import csv
+from datetime import datetime
+
+from services.config import config
+from services.tracking import move_live_to_finished, prune_live_trackers_keep_last_n
+
+# ---------- file utils ----------
+
+def ensure_reports_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+def _reports_root() -> Path:
+    base = Path(config().get("REPORTS_DIR") or "reports").resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+def write_json(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+
+def write_failed_csv(path: Path, failed_rows: List[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cols = [
+        "index", "status",
+        "ExchangeRateType", "FromCurrency", "ToCurrency",
+        "ValidFrom", "Quotation", "ExchangeRate",
+        "error", "dialog_text", "lock_table", "lock_owner", "round",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in failed_rows:
+            p = r.get("payload", {}) or {}
+            w.writerow({
+                "index": r.get("index"),
+                "status": r.get("status"),
+                "ExchangeRateType": p.get("ExchangeRateType"),
+                "FromCurrency": p.get("FromCurrency"),
+                "ToCurrency": p.get("ToCurrency"),
+                "ValidFrom": p.get("ValidFrom"),
+                "Quotation": p.get("Quotation"),
+                "ExchangeRate": p.get("ExchangeRate"),
+                "error": r.get("error"),
+                "dialog_text": r.get("dialog_text"),
+                "lock_table": r.get("lock_table"),
+                "lock_owner": r.get("lock_owner"),
+                "round": r.get("round"),
+            })
+
+def write_skipped_csv(path: Path, skipped_rows: List[Dict[str, Any]]) -> None:
+    """
+    Mirror of write_failed_csv but for Skipped rows so we persist the SAP message.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cols = [
+        "index", "status",
+        "ExchangeRateType", "FromCurrency", "ToCurrency",
+        "ValidFrom", "Quotation", "ExchangeRate",
+        "dialog_text", "round",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in skipped_rows:
+            p = r.get("payload", {}) or {}
+            w.writerow({
+                "index": r.get("index"),
+                "status": r.get("status"),
+                "ExchangeRateType": p.get("ExchangeRateType"),
+                "FromCurrency": p.get("FromCurrency"),
+                "ToCurrency": p.get("ToCurrency"),
+                "ValidFrom": p.get("ValidFrom"),
+                "Quotation": p.get("Quotation"),
+                "ExchangeRate": p.get("ExchangeRate"),
+                "dialog_text": r.get("dialog_text") or r.get("error"),
+                "round": r.get("round"),
+            })
+
+# ---------- daily rollup (by records' day) ----------
+
+def _daily_dir(day: str | None = None) -> Path:
+    """
+    Day directory under reports/daily/<YYYY-MM-DD>.
+    NOTE: 'day' should be the records' day (derived from ValidFrom), not 'today'.
+    """
+    d = day or datetime.now().strftime("%Y-%m-%d")
+    return _reports_root() / "daily" / d
+
+def _read_rollup_items(day: str | None = None) -> List[Dict[str, Any]]:
+    ddir = _daily_dir(day)
+    path = ddir / "rollup.ndjson"
+    if not path.exists():
+        return []
+    items: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                items.append(json.loads(s))
+            except Exception:
+                pass
+    return items
+
+def rebuild_daily_final(day: str | None = None) -> Dict[str, Any]:
+    """
+    Build/overwrite reports/daily/<day>/final.json from the rollup file.
+    Aggregates per-batch stats into day totals + a compact list of batches.
+    """
+    d = day or datetime.now().strftime("%Y-%m-%d")
+    ddir = _daily_dir(d)
+    ddir.mkdir(parents=True, exist_ok=True)
+
+    items = _read_rollup_items(d)
+    batches: List[Dict[str, Any]] = []
+    totals = {"batches": 0, "received": 0, "created": 0, "failed": 0, "skipped": 0, "ok_batches": 0, "nok_batches": 0}
+
+    for it in items:
+        batch_id = it.get("batch_id")
+        total = int(it.get("total", it.get("received", 0)) or 0)
+        created = int(it.get("created", 0) or 0)
+        failed = int(it.get("failed", 0) or 0)
+        skipped = int(it.get("skipped", 0) or 0)
+        ok = bool(it.get("ok"))
+
+        batches.append({
+            "batch_id": batch_id,
+            "received": total,
+            "created": created,
+            "failed": failed,
+            "skipped": skipped,
+            "ok": ok,
+            "reports_dir": (it.get("reports") or {}).get("dir") or "",
+        })
+
+        totals["batches"] += 1
+        totals["received"] += total
+        totals["created"] += created
+        totals["failed"] += failed
+        totals["skipped"] += skipped
+        totals["ok_batches"] += 1 if ok else 0
+        totals["nok_batches"] += 0 if ok else 1
+
+    final_doc = {
+        "day": d,
+        "generated_at": datetime.now().isoformat(),
+        "totals": totals,
+        "batches": batches,
+    }
+    write_json(ddir / "final.json", final_doc)
+    return {"ok": True, "path": str(ddir / "final.json"), "counts": totals}
+
+def append_daily_rollup(batch_id: str, result_obj: Dict[str, Any], day: str | None = None) -> Dict[str, Any]:
+    """
+    Appends one JSON line per batch to reports/daily/<day>/rollup.ndjson,
+    then (re)builds reports/daily/<day>/final.json.
+
+    'day' MUST be the records' day (YYYY-MM-DD) when available.
+    """
+    ddir = _daily_dir(day)
+    ddir.mkdir(parents=True, exist_ok=True)
+    path = ddir / "rollup.ndjson"
+    line = json.dumps({"batch_id": batch_id, "ts": datetime.now().isoformat(), **result_obj}, ensure_ascii=False)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+    try:
+        rebuild_daily_final(day)
+    except Exception:
+        pass
+
+    return {"ok": True, "path": str(path)}
+
+# ---------- tracker archiving/pruning (wrappers) ----------
+
+def move_tracker_if_finished(cfg: Dict[str, Any], batch_id: str, track_dir: Path) -> Dict[str, Any]:
+    return move_live_to_finished(batch_id=batch_id, track_dir=track_dir)
+
+def prune_live_trackers(cfg: Dict[str, Any], keep_n: int = 10) -> Dict[str, Any]:
+    return prune_live_trackers_keep_last_n(keep_n=keep_n)
+
+
+# runner.py
+
+# services/runner.py
+from __future__ import annotations
+
+import logging
+import random
+import shutil
+import time
+import threading
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from datetime import datetime
+
+from services.schemas import ExchangeRateItem
+from services.driver import ensure_driver_binary_ready, cleanup_profiles
+from services.tracking import (
+    tracking_dir_for_batch,
+    tracking_path_for_worker,
+    init_tracking_files,
+    pending_rows_for_report,
+)
+from services.worker import worker_process, chunk_evenly
+from services.reporting import (
+    ensure_reports_dir,
+    write_json,
+    write_failed_csv,
+    write_skipped_csv,
+    append_daily_rollup,
+    move_tracker_if_finished,
+    prune_live_trackers,
+)
+
+log = logging.getLogger("sapbot")
+
+
+class BatchRunner:
+    def __init__(self, cfg: Dict[str, Any], batch_id: str, reports_root: Path, workers: int):
+        self.cfg = cfg
+        self.batch_id = batch_id
+        self.workers = max(1, int(workers))
+        self.reports_root = ensure_reports_dir(reports_root)
+        self.batch_dir = ensure_reports_dir(self.reports_root / batch_id)
+        self.track_dir = tracking_dir_for_batch(cfg, batch_id)
+
+    # ---------- helpers: records' day (from ValidFrom) + relocate ----------
+
+    @staticmethod
+    def _as_record_day(v: str | None) -> str | None:
+        """
+        Normalize ValidFrom (DD.MM.YYYY) -> YYYY-MM-DD
+        """
+        if not v:
+            return None
+        try:
+            return datetime.strptime(v.strip(), "%d.%m.%Y").strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
+    def _record_day_from_items(self, items: List[ExchangeRateItem]) -> str | None:
+        days = {self._as_record_day(it.ValidFrom) for it in items if self._as_record_day(it.ValidFrom)}
+        return list(days)[0] if len(days) == 1 else None
+
+    def _record_day_from_results(self, results: List[Dict[str, Any]]) -> str | None:
+        days = set()
+        for r in results:
+            p = r.get("payload") or {}
+            d = self._as_record_day(p.get("ValidFrom"))
+            if d:
+                days.add(d)
+        return list(days)[0] if len(days) == 1 else None
+
+    def _relocate_batch_under_day(self, day: str | None) -> None:
+        """
+        Move reports/<batch_id> → reports/<YYYY-MM-DD>/<batch_id>
+        (no-op if day is None).
+        """
+        if not day:
+            return
+        target_root = ensure_reports_dir(self.reports_root / day)
+        target = target_root / self.batch_id
+        if str(target.resolve()) == str(self.batch_dir.resolve()):
+            return
+        try:
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            shutil.move(str(self.batch_dir), str(target))
+            self.batch_dir = target
+        except Exception as e:
+            log.error("[relocate] failed moving batch_dir into day folder %s: %s: %s", day, type(e).__name__, e)
+
+    # ---------- internal helpers ----------
+
+    def _run_multithread_once(self, items: List[ExchangeRateItem]) -> Dict[str, Any]:
+        try:
+            ensure_driver_binary_ready()
+        except Exception:
+            pass
+
+        indexed = list(enumerate(items, start=1))
+        shards = chunk_evenly(indexed, self.workers)
+        stop_event = threading.Event()
+        login_sem = threading.BoundedSemaphore(int(self.cfg.get("LOGIN_CONCURRENCY", min(2, self.workers))))
+
+        init_tracking_files(self.track_dir, shards)
+
+        track_files = {w_id: tracking_path_for_worker(self.track_dir, w_id)
+                       for w_id, _ in enumerate(shards, start=1)}
+
+        all_results: List[Dict[str, Any]] = []
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            futures = []
+            for w_id, shard in enumerate(shards, start=1):
+                track_file = track_files[w_id]
+                futures.append(pool.submit(
+                    worker_process, shard, stop_event, login_sem, self.cfg, w_id, track_file
+                ))
+
+            for fut in as_completed(futures):
+                try:
+                    r = fut.result()
+                except Exception as e:
+                    r = {"results": [{
+                        "index": None,
+                        "status": "error",
+                        "error": f"worker_crashed: {type(e).__name__}: {e}",
+                    }]}
+                all_results.extend(r.get("results", []))
+
+        have_idx = {r.get("index") for r in all_results if r.get("index") is not None}
+        for tf in track_files.values():
+            try:
+                for prow in pending_rows_for_report(tf):
+                    idx = prow.get("index")
+                    if idx is not None and idx not in have_idx:
+                        all_results.append(prow)
+                        have_idx.add(idx)
+            except Exception:
+                pass
+
+        try:
+            cleanup_profiles(also_base=True)
+        except Exception:
+            pass
+
+        all_results.sort(key=lambda x: x.get("index") or 0)
+        return {"results": all_results}
+
+    # ---------------- PUBLIC: non-streaming ----------------
+    def run_force_all_done(self, items: List[ExchangeRateItem]) -> Dict[str, Any]:
+        workers = self.workers
+        base_sleep = max(0, int(self.cfg.get("FORCE_ALL_DONE_BASE_SLEEP_SEC", 8)))
+        max_rounds = int(self.cfg.get("FORCE_ALL_DONE_MAX_ROUNDS", 25))
+        max_minutes = int(self.cfg.get("FORCE_ALL_DONE_MAX_MINUTES", 60))
+
+        start_ts = time.time()
+        time_cap = (max_minutes > 0)
+
+        aggregate_results: Dict[int, Dict[str, Any]] = {}
+        pending: List[Tuple[int, ExchangeRateItem]] = list(enumerate(items, start=1))
+        round_no = 0
+
+        try:
+            while pending:
+                if max_rounds > 0 and round_no >= max_rounds:
+                    break
+                if time_cap and (time.time() - start_ts) > (max_minutes * 60):
+                    break
+
+                round_no += 1
+                round_items = [it for _, it in pending]
+                r = self._run_multithread_once(round_items)
+                round_rows = r.get("results", [])
+
+                lim = min(len(round_rows), len(pending))
+                for i in range(lim):
+                    orig_idx = pending[i][0]
+                    row = {**round_rows[i], "round": round_no}
+                    aggregate_results[orig_idx] = row
+
+                next_pending: List[Tuple[int, ExchangeRateItem]] = []
+                for i in range(lim):
+                    orig_idx, orig_item = pending[i]
+                    row = aggregate_results.get(orig_idx, {})
+                    st = (row.get("status") or "").strip().lower()
+                    if st == "pending":
+                        next_pending.append((orig_idx, orig_item))
+
+                if next_pending:
+                    time.sleep(base_sleep + random.uniform(0, 2.0))
+                    pending = next_pending
+                else:
+                    pending = []
+
+            for idx in range(1, len(items) + 1):
+                aggregate_results.setdefault(idx, {
+                    "index": idx,
+                    "payload": items[idx - 1].dict(),
+                    "status": "error",
+                    "error": "no_result",
+                    "round": round_no,
+                })
+
+            final_rows = [aggregate_results[i] for i in sorted(aggregate_results.keys())]
+            created = sum(1 for r in final_rows if (r.get("status") or "").lower() == "created")
+            failed_rows = [r for r in final_rows if (r.get("status") or "").lower() not in ("created", "skipped")]
+            failed = len(failed_rows)
+            skipped = sum(1 for r in final_rows if (r.get("status") or "").lower() == "skipped")
+            skipped_rows = [r for r in final_rows if (r.get("status") or "").lower() == "skipped"]
+
+            return {
+                "ok": failed == 0,
+                "workers": workers,
+                "total": len(items),
+                "created": created,
+                "failed": failed,
+                "skipped": skipped,
+                "results": final_rows,
+                "skipped_rows": skipped_rows,
+                "force_all_done_rounds_used": round_no,
+                "force_all_done_max_rounds": max_rounds,
+                "force_all_done_time_cap_minutes": max_minutes,
+                "track_dir": str(self.track_dir),
+            }
+        finally:
+            try:
+                if self.track_dir.exists():
+                    shutil.rmtree(self.track_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    # ---------------- PUBLIC: streaming ----------------
+    def stream_events(self, items: List[ExchangeRateItem], heartbeat_sec: int = 5) -> Iterable[str]:
+        start_ts = time.time()
+        workers = self.workers
+        base_sleep = max(0, int(self.cfg.get("FORCE_ALL_DONE_BASE_SLEEP_SEC", 8)))
+        max_rounds = int(self.cfg.get("FORCE_ALL_DONE_MAX_ROUNDS", 25))
+        max_minutes = int(self.cfg.get("FORCE_ALL_DONE_MAX_MINUTES", 60))
+        time_cap = (max_minutes > 0)
+
+        yield self._json_line({
+            "event": "start",
+            "batch_id": self.batch_id,
+            "received": len(items),
+            "workers": workers,
+            "ts": self._iso_now(),
+        })
+
+        pending_pairs: List[Tuple[int, ExchangeRateItem]] = list(enumerate(items, start=1))
+        aggregate: Dict[int, Dict[str, Any]] = {}
+        round_no = 0
+        all_rows_this_batch: List[Dict[str, Any]] = []
+
+        try:
+            while pending_pairs:
+                if max_rounds > 0 and round_no >= max_rounds:
+                    break
+                if time_cap and (time.time() - start_ts) > (max_minutes * 60):
+                    break
+
+                round_no += 1
+                shards = chunk_evenly(pending_pairs, workers)
+
+                init_tracking_files(self.track_dir, shards)
+
+                stop_event = threading.Event()
+                login_sem = threading.BoundedSemaphore(int(self.cfg.get("LOGIN_CONCURRENCY", min(2, workers))))
+
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = [
+                        pool.submit(
+                            worker_process, shard, stop_event, login_sem, self.cfg, w_id,
+                            tracking_path_for_worker(self.track_dir, w_id)
+                        )
+                        for w_id, shard in enumerate(shards, start=1)
+                    ]
+
+                    pending_futs = set(futures)
+                    last_emit = time.time()
+
+                    while pending_futs: 
+                        done, pending_futs = wait(pending_futs, timeout=heartbeat_sec, return_when=FIRST_COMPLETED)
+                        
+                        for fut in done:
+                            try: 
+                                r = fut.result()
+                            except Exception as e:
+                                r = {"results": [ {"index": None, "status": "error", "error": f"worker_crashed: {type(e).__name__}: {e}", "round": round_no} ]}
+                        
+                            rows = r.get("results", []) 
+                            for row in rows: 
+                                row["round"] = round_no
+                            all_rows_this_batch.extend(rows) 
+                            
+                            for row in rows:
+                                yield self._json_line({"event": "row", **row})
+                            last_emit = time.time()
+                            
+                        if (time.time() - last_emit) >= heartbeat_sec:
+                            yield self._json_line({"event": "tick", "ts": self._iso_now()})
+                            last_emit = time.time()
+
+            results_sorted = sorted(list(aggregate.values()), key=lambda x: (x.get("index") or 0))
+            created = sum(1 for r in results_sorted if (r.get("status") or "").lower() == "created")
+            failed_rows = [r for r in results_sorted if (r.get("status") or "").lower() not in ("created", "skipped")]
+            failed = len(failed_rows)
+            skipped = sum(1 for r in results_sorted if (r.get("status") or "").lower() == "skipped")
+            skipped_rows = [r for r in results_sorted if (r.get("status") or "").lower() == "skipped"]
+            duration_sec = time.time() - start_ts
+
+            result = {
+                "ok": (failed == 0),
+                "workers": workers,
+                "total": len(items),
+                "created": created,
+                "failed": failed,
+                "skipped": skipped,
+                "results": results_sorted,
+                "track_dir": str(self.track_dir),
+                "force_all_done_rounds_used": round_no,
+                "force_all_done_max_rounds": max_rounds,
+                "force_all_done_time_cap_minutes": max_minutes,
+            }
+
+            # persist per-batch artifacts
+            result_path = self.batch_dir / "result.json"
+            failed_json_path = self.batch_dir / "failed.json"
+            failed_csv_path = self.batch_dir / "failed.csv"
+            skipped_json_path = self.batch_dir / "skipped.json"
+            skipped_csv_path = self.batch_dir / "skipped.csv"
+
+            write_json(result_path, result)
+            write_json(failed_json_path, failed_rows)
+            write_failed_csv(failed_csv_path, failed_rows)
+            write_json(skipped_json_path, skipped_rows)
+            write_skipped_csv(skipped_csv_path, skipped_rows)
+
+            # figure records' day from the batch items and MOVE under reports/<day>/<batch_id>
+            rec_day = self._record_day_from_items(items)
+            self._relocate_batch_under_day(rec_day)
+
+            # daily rollup + archive/prune (by records' day)
+            try:
+                append_daily_rollup(self.batch_id, {**result, "duration_sec": round(duration_sec, 2)}, day=rec_day)
+            except Exception:
+                pass
+            try:
+                _td = tracking_dir_for_batch(self.cfg, self.batch_id)
+                move_tracker_if_finished(self.cfg, self.batch_id, _td)
+                prune_live_trackers(self.cfg, keep_n=int(self.cfg.get("NUM_LIVE_TRACKERS", 10)))
+            except Exception:
+                pass
+
+            # recompute artifact paths after potential relocate
+            result_path = self.batch_dir / "result.json"
+            failed_json_path = self.batch_dir / "failed.json"
+            failed_csv_path = self.batch_dir / "failed.csv"
+            skipped_json_path = self.batch_dir / "skipped.json"
+            skipped_csv_path = self.batch_dir / "skipped.csv"
+
+            yield self._json_line({
+                "event": "end",
+                "batch_id": self.batch_id,
+                "received": len(items),
+                "duration_sec": round(duration_sec, 2),
+                "created": created,
+                "failed": failed,
+                "skipped": skipped,
+                "reports": {
+                    "dir": str(self.batch_dir),
+                    "result_json": str(result_path),
+                    "failed_json": str(failed_json_path),
+                    "failed_csv": str(failed_csv_path),
+                    "skipped_json": str(skipped_json_path),
+                    "skipped_csv": str(skipped_csv_path),
+                },
+                "email": {"ok": False, "reason": "not_requested"},
+                "track_dir": str(self.track_dir),
+                "records_day": rec_day,
+            })
+
+        finally:
+            try:
+                if self.track_dir.exists():
+                    shutil.rmtree(self.track_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    # ---------- reporting helpers used by routes ----------
+
+    def write_request_summary(self, items_sample: List[Dict[str, Any]], workers: int) -> None:
+        from datetime import datetime
+        write_json(self.batch_dir / "request.json", {
+            "batch_id": self.batch_id,
+            "received": len(items_sample),
+            "ts": datetime.now().isoformat(),
+            "workers": workers,
+            "sample": items_sample[:5],
+        })
+
+    def persist_and_email(self, result: Dict[str, Any], duration_sec: float) -> Dict[str, Any]:
+        results = result.get("results", [])
+        failed_rows = [r for r in results if (r.get("status") or "").lower() not in ("created", "skipped")]
+        skipped_rows = [r for r in results if (r.get("status") or "").lower() == "skipped"]
+
+        result_path = self.batch_dir / "result.json"
+        failed_json_path = self.batch_dir / "failed.json"
+        failed_csv_path = self.batch_dir / "failed.csv"
+        skipped_json_path = self.batch_dir / "skipped.json"
+        skipped_csv_path = self.batch_dir / "skipped.csv"
+
+        write_json(result_path, result)
+        write_json(failed_json_path, failed_rows)
+        write_failed_csv(failed_csv_path, failed_rows)
+        write_json(skipped_json_path, skipped_rows)
+        write_skipped_csv(skipped_csv_path, skipped_rows)
+
+        # relocate under records' day (derived from results payloads)
+        rec_day = self._record_day_from_results(results)
+        self._relocate_batch_under_day(rec_day)
+
+        # Email summary if enabled & there are failures
+        email_info = {"ok": False, "reason": "not_requested"}
+        if self.cfg.get("EMAIL_ENABLED") and failed_rows:
+            try:
+                from services.notify import send_batch_email
+                attachments = [str(self.batch_dir / "failed.json"), str(self.batch_dir / "failed.csv")]
+                email_info = send_batch_email(
+                    batch_id=self.batch_id,
+                    received_count=result.get("total", 0),
+                    result_obj=result,
+                    failed_rows=failed_rows,
+                    attachment_paths=attachments,
+                    duration_sec=duration_sec,
+                )
+            except Exception as e:
+                email_info = {"ok": False, "reason": f"send_error: {type(e).__name__}: {e}"}
+
+        # paths may have changed after relocate
+        result_out = dict(result)
+        result_out.update({
+            "batch_id": self.batch_id,
+            "duration_sec": round(duration_sec, 2),
+            "reports": {
+                "dir": str(self.batch_dir),
+                "result_json": str(self.batch_dir / "result.json"),
+                "failed_json": str(self.batch_dir / "failed.json"),
+                "failed_csv": str(self.batch_dir / "failed.csv"),
+                "skipped_json": str(self.batch_dir / "skipped.json"),
+                "skipped_csv": str(self.batch_dir / "skipped.csv"),
+            },
+            "email": email_info,
+            "records_day": rec_day,
+        })
+
+        # Append to daily rollup for that records' day
+        try:
+            append_daily_rollup(self.batch_id, result_out, day=rec_day)
+        except Exception:
+            pass
+
+        # Archive tracker & prune
+        try:
+            from services.tracking import tracking_dir_for_batch
+            _td = tracking_dir_for_batch(self.cfg, self.batch_id)
+            move_tracker_if_finished(self.cfg, self.batch_id, _td)
+            prune_live_trackers(self.cfg, keep_n=int(self.cfg.get("NUM_LIVE_TRACKERS", 10)))
+        except Exception:
+            pass
+
+        return result_out
+
+    # ---------- small utils ----------
+
+    @staticmethod
+    def _json_line(obj: Dict[str, Any]) -> str:
+        import json
+        return json.dumps(obj) + "\n"
+
+    @staticmethod
+    def _iso_now() -> str:
+        from datetime import datetime
+        return datetime.now().isoformat()
+
+
+# safe.py
+
+from selenium.webdriver.support.ui import WebDriverWait
+
+def wait_js(driver, predicate_js: str, timeout: int) -> bool:
+    try:
+        WebDriverWait(driver, timeout).until(lambda d: bool(d.execute_script(predicate_js)))
+        return True
+    except Exception:
+        return False
+
+
+# schemas.py
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field, validator
+from decimal import Decimal, ROUND_HALF_UP
+
+
+class ExchangeRateItem(BaseModel):
+    ExchangeRateType: str = Field(..., description="e.g. M")
+    FromCurrency: str = Field(..., description="e.g. USD")
+    ToCurrency: str = Field(..., description="e.g. JOD")
+    # Normalize to DD.MM.YYYY for SAP typing
+    ValidFrom: str = Field(
+        ...,
+        description="Date like 31.12.2025 or 2025-12-31 or 12/31/2025; normalized to DD.MM.YYYY"
+    )
+    Quotation: str | None = Field("Direct", description="Direct or Indirect")
+    ExchangeRate: str | float | Decimal = Field(..., description="> 0; rounded to 5 dp")
+
+    @validator("ExchangeRateType", "FromCurrency", "ToCurrency")
+    def _up(cls, v: str):  # noqa: N805
+        return (v or "").strip().upper()
+
+    @validator("Quotation", always=True)
+    def _q(cls, v: str | None):  # noqa: N805
+        s = (v or "Direct").strip().capitalize()
+        return "Indirect" if s.startswith("Ind") else "Direct"
+
+    @validator("ValidFrom")
+    def _datefmt(cls, v: str):  # noqa: N805
+        s = (v or "").strip()
+        fmts = [
+            "%m/%d/%Y",   # 12/31/2025
+            "%Y-%m-%d",   # 2025-12-31
+            "%Y/%m/%d",   # 2025/12/31
+            "%d/%m/%Y",   # 31/12/2025
+            "%Y%m%d",     # 20251231
+            "%d.%m.%Y",   # 31.12.2025
+            "%Y-%d-%m",   # legacy 2025-31-12
+        ]
+        from datetime import datetime as _dt
+        for f in fmts:
+            try:
+                dt = _dt.strptime(s, f)
+                return dt.strftime("%d.%m.%Y")
+            except Exception:
+                pass
+        raise ValueError(f"Unrecognized date: {v}")
+
+    @validator("ExchangeRate")
+    def _5dp(cls, v):  # noqa: N805
+        q = Decimal(str(v))
+        if q <= 0:
+            raise ValueError("ExchangeRate must be > 0")
+        q = q.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+        return f"{q:.5f}"
+
+
+# temp.ipynb  (code cells only)
+
+# ── cell 1 ──
+from pathlib import Path, PurePosixPath
+import json
+
+MAX_READ_BYTES = 200_000
+SKIP_DIRS      = {'__pycache__', '.git', '.vscode', 'node_modules', 'venv', 'env', 'tmp_streamlit'}
+IGNORED_EXTS   = {
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.svg',
+    '.pdf', '.joblib'
+}
+PATHS_ONLY_EXT = {'.txt', '.csv', '.json'}         # list names, no content
+
+def _tree(root: Path) -> str:
+    """ASCII tree of *root*, skipping SKIP_DIRS and IGNORED_EXTS files."""
+    lines, stack = [root.name], []
+
+    def walk(cur: Path):
+        kids = [
+            p for p in cur.iterdir()
+            if p.name not in SKIP_DIRS
+            and not (p.is_file() and p.suffix.lower() in IGNORED_EXTS)
+        ]
+        kids.sort(key=lambda p: (p.is_file(), p.name.lower()))
+        for i, kid in enumerate(kids):
+            connector = "└── " if i == len(kids) - 1 else "├── "
+            lines.append(''.join(stack) + connector + kid.name)
+            if kid.is_dir():
+                stack.append('    ' if i == len(kids) - 1 else '│   ')
+                walk(kid)
+                stack.pop()
+    walk(root)
+    return '\n'.join(lines)
+
+def _extract_ipynb_code(nb_path: Path) -> str:
+    """Return concatenated source of code cells from a notebook."""
+    try:
+        nb_json = json.loads(nb_path.read_text(encoding='utf‑8'))
+        cells   = nb_json.get('cells', [])
+        code_blocks = []
+        for idx, cell in enumerate(cells, 1):
+            if cell.get('cell_type') == 'code':
+                src = ''.join(cell.get('source', ''))
+                code_blocks.append(f"# ── cell {idx} ──\n{src}")
+        return '\n\n'.join(code_blocks) or '[Notebook contains no code cells]'
+    except Exception as exc:
+        return f"[Could not read notebook: {exc}]"
+
+def _dump(root: Path) -> str:
+    out_lines, listed_only = [], []
+
+    for path in root.rglob('*'):
+        if path.is_dir() or any(p.name in SKIP_DIRS for p in path.parents):
+            continue
+        ext = path.suffix.lower()
+        if ext in IGNORED_EXTS:
+            continue                      # ignore images/PDFs/etc.
+
+        rel = path.relative_to(root)
+
+        # .txt / .csv / .json  → list name only
+        if ext in PATHS_ONLY_EXT:
+            listed_only.append(rel)
+            continue
+
+        # .ipynb  → dump only code cells
+        if ext == '.ipynb':
+            out_lines.append(f"\n# {rel}  (code cells only)\n")
+            out_lines.append(_extract_ipynb_code(path))
+            continue
+
+        # everything else → dump file content
+        out_lines.append(f"\n# {rel}\n")
+        try:
+            text = path.read_text('utf‑8', errors='replace')
+            if len(text) > MAX_READ_BYTES:
+                text = text[:MAX_READ_BYTES] + "\n[...TRUNCATED...]"
+            out_lines.append(text)
+        except Exception as exc:
+            out_lines.append(f"[Could not read file: {exc}]")
+
+    if listed_only:
+        out_lines.append("\n## .txt / .csv / .json files (names only)\n")
+        out_lines.extend(map(str, listed_only))
+
+    return '\n'.join(out_lines)
+
+def build_dir_report(root='.', out_file='dir_report.txt', show=True) -> str:
+    root = Path(root or '.').expanduser().resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(root)
+
+    report = (
+        "================  DIRECTORY TREE  ================\n"
+        + _tree(root)
+        + "\n\n================  FILE CONTENTS  =================\n"
+        + _dump(root)
+    )
+
+    Path(out_file).write_text(report, encoding='utf‑8')
+    if show:
+        print(report)
+        print(f"\nReport saved to {out_file}")
+    return report
+
+
+rep_text = build_dir_report(out_file="snapshot.txt", show=False)
+
+
+# tracking.py
+
+# services/tracking.py
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict, Any, List, Tuple, Optional
+import json
+import shutil
+from datetime import datetime
+
+from services.schemas import ExchangeRateItem
+from services.config import config
+
+# ---- Standardized tracker status tokens ----
+PENDING = "Pending"
+DONE    = "Done"
+SKIPPED = "Skipped"
+
+# ---- Directory layout helpers ----
+
+def _root() -> Path:
+    """Base tracking root from env TRACK_DIR (default WebService/TrackDrivers)."""
+    return Path(config().get("TRACK_DIR") or "WebService/TrackDrivers").resolve()
+
+def _live_root() -> Path:
+    p = _root() / "Live"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+def _finished_root_for_day(day: Optional[str] = None) -> Path:
+    d = day or datetime.now().strftime("%Y-%m-%d")
+    p = _root() / "Finished" / d
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+def finished_dir_for_day(day: Optional[str] = None) -> Path:
+    """Public getter to be used by reporting/daily."""
+    return _finished_root_for_day(day)
+
+def tracking_dir_for_batch(cfg: Dict[str, Any], batch_id: str) -> Path:
+    """Per-batch live tracker dir."""
+    d = _live_root() / batch_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def tracking_path_for_worker(track_dir: Path, worker_id: int) -> Path:
+    return track_dir / f"driver-{worker_id}.json"
+
+# ---- File IO helpers ----
+
+def _load_tracking(path: Path) -> Dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"worker_id": None, "items": []}
+
+def _save_tracking_atomic(path: Path, doc: Dict[str, Any]) -> None:
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+# ---- Initialize / Update ----
+
+def init_tracking_files(track_dir: Path, shards: List[List[Tuple[int, ExchangeRateItem]]]) -> None:
+    """
+    Create one JSON per worker with each row initialized as Pending.
+    """
+    track_dir.mkdir(parents=True, exist_ok=True)
+    for w_id, shard in enumerate(shards, start=1):
+        path = tracking_path_for_worker(track_dir, w_id)
+        if path.exists():
+            # keep existing (supports driver restarts)
+            continue
+        doc = {
+            "worker_id": w_id,
+            "items": [{"index": idx, "status": PENDING, "payload": it.dict()} for (idx, it) in shard],
+        }
+        _save_tracking_atomic(path, doc)
+
+def mark_item_status(path: Path, index: int, status: str, extra: Optional[Dict[str, Any]] = None) -> None:
+    """
+    Update a single item inside a worker tracking file.
+    status should be one of: Pending / Done / Skipped / Error ...
+    """
+    doc = _load_tracking(path)
+    changed = False
+    for row in doc.get("items", []):
+        if row.get("index") == index:
+            row["status"] = status
+            if extra:
+                row.update(extra)
+            changed = True
+            break
+    if changed:
+        _save_tracking_atomic(path, doc)
+
+def iter_pending_items(path: Path) -> List[Tuple[int, ExchangeRateItem]]:
+    """
+    Only return items currently Pending in this track file.
+    """
+    doc = _load_tracking(path)
+    out: List[Tuple[int, ExchangeRateItem]] = []
+    changed = False
+    for row in doc.get("items", []):
+        st = (row.get("status") or "").strip()
+        if st.lower() == PENDING.lower():
+            payload = row.get("payload") or {}
+            try:
+                item = ExchangeRateItem(**payload)
+                out.append((row.get("index"), item))
+            except Exception:
+                # malformed → mark Error to avoid loops
+                row["status"] = "Error"
+                changed = True
+    if changed:
+        _save_tracking_atomic(path, doc)
+    return out
+
+def pending_rows_for_report(path: Path) -> list[dict]:
+    """
+    Synthesize rows for reporting for remaining Pending items.
+    """
+    doc = _load_tracking(path)
+    out: list[dict] = []
+    for row in doc.get("items", []):
+        if (row.get("status") or "").strip().lower() == PENDING.lower():
+            out.append({
+                "index": row.get("index"),
+                "status": PENDING,
+                "payload": row.get("payload") or {},
+            })
+    return out
+
+# ---- Live -> Finished archiving & pruning ----
+
+def _dir_has_any_pending(track_dir: Path) -> bool:
+    for f in sorted(track_dir.glob("driver-*.json")):
+        doc = _load_tracking(f)
+        for row in doc.get("items", []):
+            if (row.get("status") or "").strip().lower() == PENDING.lower():
+                return True
+    return False
+
+def move_live_to_finished(batch_id: str, track_dir: Optional[Path] = None, day: Optional[str] = None) -> Dict[str, Any]:
+    """
+    If the batch's live tracker has NO Pending rows, move it under Finished/YYYY-MM-DD/<batch_id>.
+    Returns a dict describing the action.
+    """
+    lr = _live_root()
+    tdir = track_dir or (lr / batch_id)
+    if not tdir.exists():
+        return {"ok": False, "reason": "no_live_dir", "batch_id": batch_id}
+
+    if _dir_has_any_pending(tdir):
+        return {"ok": False, "reason": "still_pending", "batch_id": batch_id, "path": str(tdir)}
+
+    dest_root = _finished_root_for_day(day)
+    dest = dest_root / batch_id
+    try:
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        shutil.move(str(tdir), str(dest))
+        return {"ok": True, "moved_to": str(dest), "batch_id": batch_id}
+    except Exception as e:
+        return {"ok": False, "reason": f"move_failed: {type(e).__name__}: {e}", "batch_id": batch_id}
+
+def prune_live_trackers_keep_last_n(keep_n: int = 10) -> Dict[str, Any]:
+    """
+    Keep only the most-recent N live batch tracker dirs by mtime; delete older ones.
+    """
+    keep_n = max(0, int(keep_n))
+    lr = _live_root()
+    if not lr.exists():
+        return {"ok": True, "deleted": [], "kept": []}
+
+    dirs = [d for d in lr.iterdir() if d.is_dir()]
+    dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    to_keep = dirs[:keep_n] if keep_n > 0 else []
+    to_delete = dirs[keep_n:] if keep_n >= 0 else []
+
+    deleted = []
+    for d in to_delete:
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+            deleted.append(str(d))
+        except Exception:
+            pass
+
+    return {"ok": True, "deleted": deleted, "kept": [str(p) for p in to_keep]}
+
+# ---- Live status summary (for routes/currency.py) ----
+
+def _count_statuses_in_doc(doc: Dict[str, Any]) -> Dict[str, int]:
+    """
+    Count normalized statuses in a single tracking doc.
+    Normalization: 'created' -> Done, 'skipped' -> Skipped, 'pending' -> Pending.
+    Anything else -> Error.
+    """
+    counts = {DONE: 0, SKIPPED: 0, PENDING: 0, "Error": 0}
+    for row in doc.get("items", []):
+        raw = (row.get("status") or "").strip().lower()
+        if raw == "done" or raw == "created":
+            counts[DONE] += 1
+        elif raw == "skipped":
+            counts[SKIPPED] += 1
+        elif raw == "pending":
+            counts[PENDING] += 1
+        else:
+            counts["Error"] += 1
+    return counts
+
+def read_live_status_summary(batch_id: Optional[str] = None, track_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """
+    Summarize the live tracker(s).
+    - If track_dir is provided, summarize that directory.
+    - Else if batch_id is provided, summarize Live/<batch_id>.
+    - Else, summarize ALL batches under Live/.
+    Returns dict with totals and per-worker breakdown (when summarizing a single batch).
+    """
+    lr = _live_root()
+    if track_dir is None:
+        if batch_id:
+            track_dir = lr / batch_id
+        else:
+            # global summary across all live batches
+            batches = []
+            for bdir in sorted([d for d in lr.iterdir() if d.is_dir()]):
+                b_tot = {DONE: 0, SKIPPED: 0, PENDING: 0, "Error": 0}
+                for f in sorted(bdir.glob("driver-*.json")):
+                    doc = _load_tracking(f)
+                    c = _count_statuses_in_doc(doc)
+                    for k, v in c.items():
+                        b_tot[k] = b_tot.get(k, 0) + int(v)
+                batches.append({"batch_id": bdir.name, "totals": b_tot, "path": str(bdir)})
+            grand = {DONE: 0, SKIPPED: 0, PENDING: 0, "Error": 0}
+            for b in batches:
+                for k, v in b["totals"].items():
+                    grand[k] = grand.get(k, 0) + int(v)
+            return {"ok": True, "scope": "all", "totals": grand, "batches": batches, "live_root": str(lr)}
+
+    # single batch dir summary
+    if not track_dir.exists():
+        return {"ok": False, "reason": "not_found", "path": str(track_dir)}
+    by_worker = []
+    totals = {DONE: 0, SKIPPED: 0, PENDING: 0, "Error": 0}
+    for f in sorted(track_dir.glob("driver-*.json")):
+        doc = _load_tracking(f)
+        wid = doc.get("worker_id")
+        c = _count_statuses_in_doc(doc)
+        by_worker.append({"worker_id": wid, "file": f.name, "totals": c})
+        for k, v in c.items():
+            totals[k] = totals.get(k, 0) + int(v)
+
+    return {
+        "ok": True,
+        "scope": "batch",
+        "batch_id": batch_id or track_dir.name,
+        "path": str(track_dir),
+        "totals": totals,
+        "by_worker": by_worker,
+        "has_pending": totals.get(PENDING, 0) > 0,
+    }
+
+
+# ui.py
+
+# services/ui.py
+from selenium.webdriver.support.ui import WebDriverWait
+from services.config import EXPLICIT_WAIT_SEC
+from core.base import fluent_wait
+
+def _wait_js(driver, script: str, timeout: int) -> bool:
+    try:
+        fluent_wait(driver, timeout).until(lambda d: bool(d.execute_script(script)))
+        return True
+    except Exception:
+        return False
+
+def wait_for_shell_home(driver, timeout: int | None = None) -> bool:
+    """
+    Ready when:
+      - URL contains '#Shell-home', OR
+      - UI5 core is initialized and ushell container is present.
+    """
+    t = timeout or EXPLICIT_WAIT_SEC
+    try:
+        fluent_wait(driver, t).until(
+            lambda d: "shell-home" in (d.current_url or "").lower()
+        )
+        return True
+    except Exception:
+        pass
+
+    js = """
+    try {
+      if (!window.sap || !sap.ui) return false;
+      if (sap.ushell && sap.ushell.Container) return true;
+      var core = sap.ui.getCore && sap.ui.getCore();
+      if (!core) return false;
+      if (core.isInitialized && !core.isInitialized()) return false;
+      return true;
+    } catch (e) { return false; }
+    """
+    return _wait_js(driver, js, t)
+
+def wait_ui5_idle(driver, timeout: int | None = None) -> bool:
+    """
+    Lightweight 'settled' check for UI5 renderer and DOM idle enough to interact.
+    """
+    t = timeout or EXPLICIT_WAIT_SEC
+    js = """
+    try {
+      if (document.readyState !== 'complete') return false;
+      if (window.sap && sap.ui && sap.ui.getCore) {
+        var core = sap.ui.getCore();
+        if (core && core.isInitialized && !core.isInitialized()) return false;
+        if (core && core.getUIDirty && core.getUIDirty()) return false;
+      }
+      return true;
+    } catch (e) { return true; }
+    """
+    return _wait_js(driver, js, t)
+
+def wait_url_contains(driver, needle: str, timeout: int | None = None) -> bool:
+    t = timeout or EXPLICIT_WAIT_SEC
+    try:
+        fluent_wait(driver, t).until(
+            lambda d: needle.lower() in (d.current_url or "").lower()
+        )
+        return True
+    except Exception:
+        return False
+
+# ---------- Robust shell search readiness + JS fallback ----------
+
+def wait_shell_search_ready(driver, timeout: int | None = None) -> bool:
+    """
+    Wait until the FLP header search control is available OR the renderer exists.
+    """
+    t = timeout or EXPLICIT_WAIT_SEC
+    js = """
+    try {
+      var hasSearch = !!document.querySelector('a#sf.sapUshellShellHeadItm')
+                   || !!document.querySelector("a.sapUshellShellHeadItm[data-help-id='shellHeader-search']")
+                   || !!document.querySelector("a.sapUshellShellHeadItm[role='button'][aria-label*='Search']");
+      if (hasSearch) return true;
+      if (window.sap && sap.ushell && sap.ushell.Container) {
+         var r = sap.ushell.Container.getRenderer && sap.ushell.Container.getRenderer();
+         if (r) return true;
+      }
+      return false;
+    } catch(e){ return false; }
+    """
+    return _wait_js(driver, js, t)
+
+def open_shell_search_via_js(driver) -> bool:
+    """
+    Ask the FLP renderer to open the global search.
+    Returns True if we could call an API; False otherwise.
+    """
+    js = """
+    try {
+      if (window.sap && sap.ushell && sap.ushell.Container){
+         var r = sap.ushell.Container.getRenderer && sap.ushell.Container.getRenderer();
+         if (r){
+            if (typeof r.showSearch === 'function'){ r.showSearch(true); return true; }
+            if (typeof r.openSearch === 'function'){ r.openSearch(); return true; }
+         }
+      }
+    } catch(e){}
+    return false;
+    """
+    try:
+        return bool(driver.execute_script(js))
+    except Exception:
+        return False
+
+
+# worker.py
+
+# services/worker.py
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from functools import partial
+from typing import Dict, Any, List, Tuple
+
+from selenium.common.exceptions import (
+    InvalidSessionIdException,
+    WebDriverException,
+    NoSuchWindowException,
+    TimeoutException,
+    StaleElementReferenceException,
+    ElementClickInterceptedException,
+    ElementNotInteractableException,
+)
+
+from services.schemas import ExchangeRateItem
+from services.driver import get_driver
+from services.auth import login
+from services.ui import wait_ui5_idle, wait_for_shell_home, wait_shell_search_ready, wait_url_contains
+from pages.Shell.Search.element import ShellSearch
+from pages.CurrencyExchangeRates.page import CurrencyExchangeRatesPage
+from services.commit import commit_gate
+from services.tracking import mark_item_status, iter_pending_items
+
+log = logging.getLogger("sapbot")
+
+
+def _is_fatal_session_err(err: Exception) -> bool:
+    msg = (str(err) or "").lower()
+    return (
+        isinstance(err, (InvalidSessionIdException, NoSuchWindowException))
+        or any(s in msg for s in [
+            "invalid session id",
+            "chrome not reachable",
+            "target closed",
+            "disconnected: not connected to devtools",
+            "cannot determine loading status",
+        ])
+    )
+
+
+def _open_currency_app(drv) -> CurrencyExchangeRatesPage:
+    if not wait_for_shell_home(drv, timeout=60):
+        raise RuntimeError("Shell home not detected after login")
+    wait_ui5_idle(drv, timeout=30)
+    wait_shell_search_ready(drv, timeout=30)
+
+    from selenium.common.exceptions import StaleElementReferenceException
+    from services.ui import open_shell_search_via_js
+    import time
+
+    # Prefer FLP renderer JS (avoids stale header element)
+    opened_via_js = open_shell_search_via_js(drv)
+
+    attempts = 0
+    while attempts < 3:
+        attempts += 1
+        try:
+            if not opened_via_js:
+                # Fall back to DOM-based open if JS didn’t work
+                ShellSearch(drv).open_search()
+            # Type and choose app (this finds elements fresh each time)
+            ShellSearch(drv).type_and_choose_app("Currency Exchange Rates")
+            wait_ui5_idle(drv, timeout=30)
+            wait_url_contains(drv, "#Currency-maintainExchangeRates", 40)
+            page = CurrencyExchangeRatesPage(drv)
+            page.ensure_in_app(max_attempts=3, settle_each=8)
+            return page
+        except StaleElementReferenceException as e:
+            # brief settle & try again with a fresh DOM
+            time.sleep(0.5)
+            wait_ui5_idle(drv, timeout=10)
+            opened_via_js = open_shell_search_via_js(drv) or opened_via_js
+        except Exception:
+            # small backoff and retry once more
+            time.sleep(0.7)
+
+    # One last attempt after a slightly longer settle
+    time.sleep(1.2)
+    opened_via_js = open_shell_search_via_js(drv) or opened_via_js
+    ShellSearch(drv).open_search()
+    ShellSearch(drv).type_and_choose_app("Currency Exchange Rates")
+    wait_ui5_idle(drv, timeout=30)
+    wait_url_contains(drv, "#Currency-maintainExchangeRates", 40)
+    page = CurrencyExchangeRatesPage(drv)
+    page.ensure_in_app(max_attempts=3, settle_each=8)
+    return page
+
+
+def chunk_evenly(indexed: List[Tuple[int, ExchangeRateItem]], workers: int) -> List[List[Tuple[int, ExchangeRateItem]]]:
+    n = max(1, min(workers, len(indexed))) if indexed else 1
+    k, m = divmod(len(indexed), n)
+    chunks: List[List[Tuple[int, ExchangeRateItem]]] = []
+    start = 0
+    for i in range(n):
+        end = start + k + (1 if i < m else 0)
+        if start < end:
+            chunks.append(indexed[start:end])
+        start = end
+    return chunks
+
+
+def _commit_key_for_item(it: ExchangeRateItem, strategy: str) -> str | None:
+    """Build a commit gate key according to the configured strategy."""
+    strat = (strategy or "full").strip().lower()
+    if strat in ("off", "none", "disabled"):
+        return None
+    if strat in ("table", "tcurr"):
+        return "TCURR"
+
+    base_parts = [
+        (it.ExchangeRateType or "").strip().upper(),
+        (it.FromCurrency or "").strip().upper(),
+        (it.ToCurrency or "").strip().upper(),
+        (it.ValidFrom or "").strip(),
+    ]
+
+    if strat in ("pair", "type_pair", "tpair"):
+        parts = base_parts[:3]
+    elif strat in ("type", "exch_type"):
+        parts = base_parts[:1]
+    elif strat in ("full", "default"):
+        parts = base_parts
+    else:
+        parts = base_parts
+
+    token = "|".join(p for p in parts if p)
+    return token or None
+
+
+def worker_process(
+    shard: List[Tuple[int, ExchangeRateItem]],
+    stop_event: threading.Event,
+    login_sem: threading.Semaphore,
+    cfg: Dict[str, Any],
+    worker_id: int,
+    track_file_path,  # Path
+) -> Dict[str, Any]:
+    """
+    Per-thread worker. Own Chrome session.
+    Uses per-worker tracking file to persist progress. Status values:
+      - Pending  → not finished, will be retried
+      - Done     → created (success)
+      - Skipped  → duplicate existed (policy)
+      - Error    → terminal error for this batch
+
+    **IMPORTANT CHANGE**
+    If a tracker file exists, we will ONLY process rows still marked Pending.
+    If there are no Pending rows in the tracker, we return immediately with no work.
+    We DO NOT fall back to the original shard in that case.
+    """
+    results: List[Dict[str, Any]] = []
+    drv = None
+    page = None
+
+    key_strategy = str(cfg.get("COMMIT_KEY_STRATEGY", "pair"))
+
+    WATCHDOG_SECONDS = int(cfg.get("WATCHDOG_SECONDS", 2000))
+    MAX_OPEN_RETRIES = 3
+    NONFATAL_RETRIES = 2  # soft retries inside SAME driver for flaky DOM
+
+    # ---- Build the todo queue ----
+    # If the tracker file exists, ALWAYS respect it and only take Pending rows.
+    # If it doesn't exist (should not happen after init), fall back to the shard (first run).
+    if track_file_path and track_file_path.exists():
+        pending_list = iter_pending_items(track_file_path)
+        # CRITICAL: do not "re-expand" the shard when nothing is pending; just exit with no work.
+        if not pending_list:
+            return {"interrupted": False, "results": []}
+    else:
+        pending_list = shard[:]
+
+    def _kill_driver():
+        nonlocal drv
+        try:
+            if drv:
+                drv.quit()
+        except Exception:
+            pass
+        drv = None
+
+    def _recreate_driver_and_reopen(max_open_retries: int = MAX_OPEN_RETRIES):
+        nonlocal drv, page
+        log.warning("[reopen] worker=%s recreating driver (max_open_retries=%s)", worker_id, max_open_retries)
+        _kill_driver()
+        drv = get_driver(headless=cfg["HEADLESS"])
+        with login_sem:
+            login(drv)
+        wait_ui5_idle(drv, timeout=30)
+        last_exc = None
+        for attempt in range(1, max_open_retries + 1):
+            try:
+                page_local = _open_currency_app(drv)
+                log.info("[reopen] worker=%s reopened app on attempt=%s", worker_id, attempt)
+                return page_local
+            except Exception as e:
+                last_exc = e
+                log.error("[reopen] worker=%s attempt=%s failed: %s: %s", worker_id, attempt, type(e).__name__, e)
+                time.sleep(1.0 * attempt)
+        raise RuntimeError(f"open_app_failed after {max_open_retries} attempts: {last_exc}")
+
+    def _track_skipped(idx: int, row: Dict[str, Any]):
+        """
+        Ensure dialog_text (or error) is persisted for Skipped rows, both in results and tracking.
+        """
+        # normalize & keep dialog_text in results
+        if not row.get("dialog_text"):
+            if row.get("error"):
+                row["dialog_text"] = row["error"]
+        results.append(row)
+        if track_file_path:
+            mark_item_status(
+                track_file_path,
+                idx,
+                "Skipped",
+                {
+                    "notes": row.get("notes", {}),
+                    "dialog_text": row.get("dialog_text") or "",
+                },
+            )
+
+    try:
+        try:
+            page = _recreate_driver_and_reopen()
+        except Exception as e:
+            # Could not open a browser/app now. Leave rows Pending so the runner requeues.
+            log.error("[init-failed] worker=%s could not open driver/app: %s: %s",
+                      worker_id, type(e).__name__, e)
+            return {"interrupted": False, "results": []}
+
+        for idx, it in pending_list:
+            commit_key = _commit_key_for_item(it, key_strategy)
+            if stop_event.is_set():
+                stop_event.clear()
+
+            def _watchdog_kill():
+                log.critical("[watchdog] worker=%s idx=%s exceeded=%ss → killing driver", worker_id, idx, WATCHDOG_SECONDS)
+                _kill_driver()
+
+            def _do_one():
+                timer = threading.Timer(WATCHDOG_SECONDS, _watchdog_kill)
+                timer.daemon = True
+                timer.start()
+                try:
+                    return page.create_rate(
+                        exch_type=it.ExchangeRateType,
+                        from_ccy=it.FromCurrency,
+                        to_ccy=it.ToCurrency,
+                        valid_from_mmddyyyy=it.ValidFrom,
+                        quotation=it.Quotation,
+                        rate_value=it.ExchangeRate,
+                        commit_gate=(partial(commit_gate, key=commit_key) if commit_key is not None else commit_gate),
+                    )
+                finally:
+                    try:
+                        timer.cancel()
+                    except Exception:
+                        pass
+
+            soft_attempt = 0
+            while True:
+                try:
+                    res = _do_one()
+                    row = {"index": idx, "payload": it.dict(), **res, "worker": worker_id}
+                    # normalize status coming from page
+                    st = (row.get("status") or "").strip().lower()
+                    if st == "created":
+                        results.append(row)
+                        if track_file_path:
+                            mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
+                    elif st == "skipped":
+                        _track_skipped(idx, row)
+                    elif st == "pending":
+                        results.append(row)
+                        if track_file_path:
+                            mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
+                    else:
+                        results.append({**row, "status": "error"})
+                        if track_file_path:
+                            mark_item_status(
+                                track_file_path, idx, "Error",
+                                {"error": row.get("error") if isinstance(row.get("error"), str) else (row.get("dialog_text") or "")}
+                            )
+                    time.sleep(0.2)
+                    break
+
+                except TimeoutException as e:
+                    log.error("[driver-recreate] worker=%s idx=%s cause=TimeoutException msg=%r", worker_id, idx, str(e))
+                    try:
+                        page = _recreate_driver_and_reopen(max_open_retries=2)
+                        res = _do_one()
+                        row = {"index": idx, "payload": it.dict(), **res, "worker": worker_id}
+                        st = (row.get("status") or "").strip().lower()
+                        if st == "created":
+                            results.append(row); mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
+                        elif st == "skipped":
+                            _track_skipped(idx, row)
+                        elif st == "pending":
+                            results.append(row); mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
+                        else:
+                            results.append({**row, "status": "error"}); mark_item_status(track_file_path, idx, "Error",
+                                                                                          {"error": row.get("error") or row.get("dialog_text") or ""})
+                    except Exception as e2:
+                        row = {
+                            "index": idx, "payload": it.dict(), "status": "error",
+                            "error": f"recover_failed(w{worker_id}): {type(e2).__name__}: {e2}",
+                            "worker": worker_id,
+                        }
+                        results.append(row)
+                        if track_file_path:
+                            mark_item_status(track_file_path, idx, "Error", {"error": row["error"]})
+                    break
+
+                except (StaleElementReferenceException, ElementClickInterceptedException, ElementNotInteractableException) as e:
+                    if soft_attempt < NONFATAL_RETRIES:
+                        soft_attempt += 1
+                        log.warning("[soft-retry] worker=%s idx=%s attempt=%s cls=%s msg=%r",
+                                    worker_id, idx, soft_attempt, type(e).__name__, str(e))
+                        try:
+                            page.ensure_in_app_quick()
+                        except Exception:
+                            try:
+                                page.ensure_in_app(max_attempts=2, settle_each=8)
+                            except Exception:
+                                pass
+                        time.sleep(0.3)
+                        continue
+                    else:
+                        log.error("[soft-retry-exhausted] worker=%s idx=%s cls=%s → recreating driver",
+                                  worker_id, idx, type(e).__name__)
+                        try:
+                            page = _recreate_driver_and_reopen(max_open_retries=2)
+                            res = _do_one()
+                            row = {"index": idx, "payload": it.dict(), **res, "worker": worker_id}
+                            st = (row.get("status") or "").strip().lower()
+                            if st == "created":
+                                results.append(row); mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
+                            elif st == "skipped":
+                                _track_skipped(idx, row)
+                            elif st == "pending":
+                                results.append(row); mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
+                            else:
+                                results.append({**row, "status": "error"}); mark_item_status(track_file_path, idx, "Error",
+                                                                                              {"error": row.get("error") or row.get("dialog_text") or ""})
+                        except Exception as e2:
+                            row = {
+                                "index": idx, "payload": it.dict(), "status": "error",
+                                "error": f"recover_failed(w{worker_id}): {type(e2).__name__}: {e2}",
+                                "worker": worker_id,
+                            }
+                            results.append(row)
+                            if track_file_path:
+                                mark_item_status(track_file_path, idx, "Error", {"error": row["error"]})
+                        break
+
+                except WebDriverException as e:
+                    fatal = _is_fatal_session_err(e)
+                    log.error("[driver-exc] worker=%s idx=%s fatal=%s cls=%s msg=%r",
+                              worker_id, idx, fatal, type(e).__name__, str(e))
+                    if fatal:
+                        try:
+                            page = _recreate_driver_and_reopen(max_open_retries=2)
+                            res = _do_one()
+                            row = {"index": idx, "payload": it.dict(), **res, "worker": worker_id}
+                            st = (row.get("status") or "").strip().lower()
+                            if st == "created":
+                                results.append(row); mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
+                            elif st == "skipped":
+                                _track_skipped(idx, row)
+                            elif st == "pending":
+                                results.append(row); mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
+                            else:
+                                results.append({**row, "status": "error"}); mark_item_status(track_file_path, idx, "Error",
+                                                                                              {"error": row.get("error") or row.get("dialog_text") or ""})
+                        except Exception as e2:
+                            row = {
+                                "index": idx, "payload": it.dict(), "status": "error",
+                                "error": f"recover_failed(w{worker_id}): {type(e2).__name__}: {e2}",
+                                "worker": worker_id,
+                            }
+                            results.append(row)
+                            if track_file_path:
+                                mark_item_status(track_file_path, idx, "Error", {"error": row["error"]})
+                    else:
+                        if soft_attempt < NONFATAL_RETRIES:
+                            soft_attempt += 1
+                            log.warning("[soft-retry] worker=%s idx=%s attempt=%s nonfatal-webdriver cls=%s msg=%r",
+                                        worker_id, idx, soft_attempt, type(e).__name__, str(e))
+                            try:
+                                page.ensure_in_app_quick()
+                            except Exception:
+                                try:
+                                    page.ensure_in_app(max_attempts=2, settle_each=8)
+                                except Exception:
+                                    pass
+                            time.sleep(0.3)
+                            continue
+                        else:
+                            log.error("[soft-retry-exhausted] worker=%s idx=%s nonfatal-webdriver → recreating driver",
+                                      worker_id, idx)
+                            try:
+                                page = _recreate_driver_and_reopen(max_open_retries=2)
+                                res = _do_one()
+                                row = {"index": idx, "payload": it.dict(), **res, "worker": worker_id}
+                                st = (row.get("status") or "").strip().lower()
+                                if st == "created":
+                                    results.append(row); mark_item_status(track_file_path, idx, "Done", {"notes": row.get("notes", {})})
+                                elif st == "skipped":
+                                    _track_skipped(idx, row)
+                                elif st == "pending":
+                                    results.append(row); mark_item_status(track_file_path, idx, "Pending", {"notes": row.get("notes", {})})
+                                else:
+                                    results.append({**row, "status": "error"}); mark_item_status(track_file_path, idx, "Error",
+                                                                                                {"error": row.get("error") or row.get("dialog_text") or ""})
+                            except Exception as e2:
+                                row = {
+                                    "index": idx, "payload": it.dict(), "status": "error",
+                                    "error": f"recover_failed(w{worker_id}): {type(e2).__name__}: {e2}",
+                                    "worker": worker_id,
+                                }
+                                results.append(row)
+                                if track_file_path:
+                                    mark_item_status(track_file_path, idx, "Error", {"error": row["error"]})
+                    break
+
+    finally:
+        try:
+            if drv:
+                drv.quit()
+        except Exception:
+            pass
+
+    return {"interrupted": False, "results": results}
+
+
+# __init__.py
+
+from .config import config
+from .driver import get_driver
+from .auth import login
+
+__all__ = ["config", "get_driver", "login"]

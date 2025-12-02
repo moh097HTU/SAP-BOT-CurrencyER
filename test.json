@@ -1,0 +1,56 @@
+{
+    "Taxs": [
+        {
+            "TaxId": 2,
+            "TaxValue": "10 %",
+            "Rate": 10.0,
+            "TaxCode": "0002"
+        }
+    ],
+    "Expenses": [
+        {
+            "ExpenseTypeId": 110,
+            "ExpenseTypeName": "Maintenance Expenses",
+            "ExpenseParentId": 110,
+            "ParentType": true,
+            "AssignmentType": 0,
+            "CostElementName": "",
+            "UnitName": ""
+        }
+    ],
+    "Currencies": [
+        {
+            "CurrencyId": 1,
+            "CurrencyName": "Jordanian Dinar",
+            "CurrencyShortName": "JOD",
+            "Percision": 3
+        }
+    ],
+    "Employees": [
+        {
+            "Id": 2885,
+            "Name": "PettyCash  User"
+        }
+    ],
+    "PaymentMethods": [
+        {
+            "Id": 1,
+            "Name": "Cash"
+        }
+    ],
+    "Countries": [
+        {
+            "Id": 2,
+            "Name": "ARGENTINA"
+        }
+    ],
+    "LockoutSetting": {
+        "MaxAttempts": 3,
+        "LockoutTime": 10,
+        "LockoutAfterTime": 60
+    },
+    "FileSizeSetting": {
+        "MaxFileSize": 5120.0,
+        "FileCompressSize": 4096.0
+    }
+}

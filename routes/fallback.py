@@ -143,7 +143,7 @@ def _normalize_filter_rows(rows: List[Dict[str, Any]]) -> Tuple[List[ExchangeRat
     return out, stats
 
 
-# ---------- Existing endpoint: collect missing via Excel ----------
+# ---------- collect missing via Excel ----------
 @router.post("/collect-missing")
 async def collect_missing(
     date_from: Optional[str] = Query(default=None),
@@ -163,7 +163,7 @@ async def collect_missing(
     return res
 
 
-# ---------- NEW endpoint: refill from WebService/TrackDrivers/Fallback/*.json ----------
+# ---------- refill from WebService/TrackDrivers/Fallback/*.json ----------
 @router.post("/refill-missing")
 async def refill_missing(
     date_from: Optional[str] = Query(default=None),

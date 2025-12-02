@@ -1,0 +1,4084 @@
+================  DIRECTORY TREE  ================
+pages
+├── CurrencyExchangeRates
+│   ├── elements
+│   │   ├── Dialog
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── DraftFinder
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── ExcelExport
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Factors
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Fields
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Footer
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Header
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── ListToolbar
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Messages
+│   │   │   └── element.py
+│   │   ├── Quotation
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Rate
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── SideColumn
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Status
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Toast
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Validation
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   └── __init__.py
+│   ├── __init__.py
+│   ├── page.py
+│   └── selectors.py
+├── Index
+│   ├── ProcurementOverviewTile
+│   │   ├── __init__.py
+│   │   ├── element.py
+│   │   └── selectors.py
+│   ├── PurchasingTab
+│   │   ├── __init__.py
+│   │   ├── element.py
+│   │   └── selectors.py
+│   ├── __init__.py
+│   └── page.py
+├── Login
+│   ├── elements
+│   │   ├── Password
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Submit
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   ├── Username
+│   │   │   ├── __init__.py
+│   │   │   ├── element.py
+│   │   │   └── selectors.py
+│   │   └── __init__.py
+│   ├── __init__.py
+│   ├── page.py
+│   ├── snapshot.txt
+│   └── temp.ipynb
+├── Shell
+│   ├── Search
+│   │   ├── __init__.py
+│   │   ├── element.py
+│   │   └── selectors.py
+│   └── __init__.py
+├── __init__.py
+├── snapshot.txt
+└── temp.ipynb
+
+================  FILE CONTENTS  =================
+
+# temp.ipynb  (code cells only)
+
+# ── cell 1 ──
+from pathlib import Path, PurePosixPath
+import json
+
+MAX_READ_BYTES = 200_000
+SKIP_DIRS      = {'__pycache__', '.git', '.vscode', 'node_modules', 'venv', 'env', 'tmp_streamlit', 'chrome_profile'}
+IGNORED_EXTS   = {
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.svg',
+    '.pdf', '.joblib'
+}
+PATHS_ONLY_EXT = {'.txt', '.csv', '.json'}         # list names, no content
+
+def _tree(root: Path) -> str:
+    """ASCII tree of *root*, skipping SKIP_DIRS and IGNORED_EXTS files."""
+    lines, stack = [root.name], []
+
+    def walk(cur: Path):
+        kids = [
+            p for p in cur.iterdir()
+            if p.name not in SKIP_DIRS
+            and not (p.is_file() and p.suffix.lower() in IGNORED_EXTS)
+        ]
+        kids.sort(key=lambda p: (p.is_file(), p.name.lower()))
+        for i, kid in enumerate(kids):
+            connector = "└── " if i == len(kids) - 1 else "├── "
+            lines.append(''.join(stack) + connector + kid.name)
+            if kid.is_dir():
+                stack.append('    ' if i == len(kids) - 1 else '│   ')
+                walk(kid)
+                stack.pop()
+    walk(root)
+    return '\n'.join(lines)
+
+def _extract_ipynb_code(nb_path: Path) -> str:
+    """Return concatenated source of code cells from a notebook."""
+    try:
+        nb_json = json.loads(nb_path.read_text(encoding='utf‑8'))
+        cells   = nb_json.get('cells', [])
+        code_blocks = []
+        for idx, cell in enumerate(cells, 1):
+            if cell.get('cell_type') == 'code':
+                src = ''.join(cell.get('source', ''))
+                code_blocks.append(f"# ── cell {idx} ──\n{src}")
+        return '\n\n'.join(code_blocks) or '[Notebook contains no code cells]'
+    except Exception as exc:
+        return f"[Could not read notebook: {exc}]"
+
+def _dump(root: Path) -> str:
+    out_lines, listed_only = [], []
+
+    for path in root.rglob('*'):
+        if path.is_dir() or any(p.name in SKIP_DIRS for p in path.parents):
+            continue
+        ext = path.suffix.lower()
+        if ext in IGNORED_EXTS:
+            continue                      # ignore images/PDFs/etc.
+
+        rel = path.relative_to(root)
+
+        # .txt / .csv / .json  → list name only
+        if ext in PATHS_ONLY_EXT:
+            listed_only.append(rel)
+            continue
+
+        # .ipynb  → dump only code cells
+        if ext == '.ipynb':
+            out_lines.append(f"\n# {rel}  (code cells only)\n")
+            out_lines.append(_extract_ipynb_code(path))
+            continue
+
+        # everything else → dump file content
+        out_lines.append(f"\n# {rel}\n")
+        try:
+            text = path.read_text('utf‑8', errors='replace')
+            if len(text) > MAX_READ_BYTES:
+                text = text[:MAX_READ_BYTES] + "\n[...TRUNCATED...]"
+            out_lines.append(text)
+        except Exception as exc:
+            out_lines.append(f"[Could not read file: {exc}]")
+
+    if listed_only:
+        out_lines.append("\n## .txt / .csv / .json files (names only)\n")
+        out_lines.extend(map(str, listed_only))
+
+    return '\n'.join(out_lines)
+
+def build_dir_report(root='.', out_file='dir_report.txt', show=True) -> str:
+    root = Path(root or '.').expanduser().resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(root)
+
+    report = (
+        "================  DIRECTORY TREE  ================\n"
+        + _tree(root)
+        + "\n\n================  FILE CONTENTS  =================\n"
+        + _dump(root)
+    )
+
+    Path(out_file).write_text(report, encoding='utf‑8')
+    if show:
+        print(report)
+        print(f"\nReport saved to {out_file}")
+    return report
+
+
+rep_text = build_dir_report(out_file="snapshot.txt", show=False)
+
+
+# __init__.py
+
+
+
+# CurrencyExchangeRates\page.py
+
+# pages/CurrencyExchangeRates/page.py
+
+from urllib.parse import urlparse
+from datetime import datetime
+import os
+import time
+import re
+from typing import Optional
+from contextlib import nullcontext
+
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+from core.base import Page, Element
+from services.ui import wait_ui5_idle
+from .selectors import APP_HASH
+
+# Elements
+from .elements.ListToolbar.element import ListToolbar
+from .elements.Dialog.element import DialogWatcher
+from .elements.Fields.element import Fields
+from .elements.Factors.element import Factors
+from .elements.Quotation.element import QuotationField
+from .elements.Rate.element import ExchangeRateField
+from .elements.Footer.element import FooterActions
+from .elements.Toast.element import ToastReader
+from .elements.Validation.element import ValidationInspector
+from .elements.SideColumn.element import SideColumnController
+from .elements.Header.element import ObjectHeaderVerifier
+
+# For verify-after-set of Quotation
+from .elements.Quotation.selectors import QUOTATION_INNER_INPUT_XPATH
+
+# legacy constant (not used directly; Fields.EXCH_TYPE_INPUT_XPATH is used)
+EXCH_TYPE_INPUT_XPATH = ("//input[contains(@id,"
+                         "'ExchangeRateTypeForEdit::Field-input-inner')]")
+
+# The exact label we want for the Exchange Rate Type field
+TARGET_EXCH_TYPE_LABEL = "M (Standard translation at average rate)"
+
+# --- tiny retry helper (local, non-invasive) ---
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+
+class CurrencyExchangeRatesPage(Page):
+    def __init__(self, driver, root: Optional[str] = None):
+        super().__init__(driver, root)
+        self._app_ready_fast = False  # quick flag
+
+    def _el(self) -> Element:
+        return Element(self.driver)
+
+    # -------- Utilities --------
+    def _origin(self) -> str:
+        try:
+            return self.driver.execute_script("return location.origin;")
+        except Exception:
+            parsed = urlparse(self.driver.current_url or "")
+            return f"{parsed.scheme}://{parsed.netloc}"
+
+    def _app_root_url(self) -> str:
+        return f"{self._origin()}/ui?sap-ushell-config=lean{APP_HASH}"
+
+    def _wait_not_busy(self, timeout: int) -> bool:
+        end = time.time() + max(1, timeout)
+        while time.time() < end:
+            try:
+                busy = self.driver.execute_script(
+                    """
+                    try{
+                      var core=sap && sap.ui && sap.ui.getCore ? sap.ui.getCore():null;
+                      if(core && core.isInitialized && !core.isInitialized()) return true;
+                      if(core && core.getUIDirty && core.getUIDirty()) return true;
+                      var BI=sap && sap.ui && sap.ui.core && sap.ui.core.BusyIndicator;
+                      if(BI && BI.oPopup && BI.oPopup.getOpenState && BI.oPopup.getOpenState() === 'OPEN'){return true;}
+                      return false;
+                    }catch(e){return false;}
+                    """
+                )
+                if not busy:
+                    return True
+            except Exception:
+                return True
+            time.sleep(0.12)
+        return False
+
+    # --- EXACTLY set Exchange Rate Type to the full label ---
+    def _set_exchange_rate_type_exact(self, fields: Fields, timeout: int = 12) -> dict:
+        """
+        Hard-sets Exchange Rate Type to the exact UI label:
+          M (Standard translation at average rate)
+
+        Returns:
+          {"ok": True, "observed": "<value>"} when confirmed exact,
+          {"ok": False, "observed": "<value>", "why": "<reason>"} otherwise.
+        """
+        el = self._el()
+        t = max(timeout, el._timeout)
+
+        def _get():
+            try:
+                return _retry_stale(lambda: (fields.get_input_value(fields.EXCH_TYPE_INPUT_XPATH) or "").strip())
+            except Exception:
+                return ""
+
+        def _blur(xpath: str):
+            try:
+                self.driver.execute_script(
+                    """
+                    try{
+                      var el=document.evaluate(arguments[0],document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;
+                      if (el){ el.dispatchEvent(new Event('change',{bubbles:true})); el.blur && el.blur(); }
+                    }catch(e){}
+                    """,
+                    xpath
+                )
+            except Exception:
+                pass
+
+        # fast path — already exact
+        cur = _get()
+        if cur == TARGET_EXCH_TYPE_LABEL:
+            return {"ok": True, "observed": cur}
+
+        # 1) Try simple 'M' + Enter + blur
+        try:
+            fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, "M", press_enter=True)
+        except Exception:
+            pass
+        _blur(fields.EXCH_TYPE_INPUT_XPATH)
+        wait_ui5_idle(self.driver, timeout=t)
+        self._wait_not_busy(t)
+        cur = _get()
+        if cur == TARGET_EXCH_TYPE_LABEL:
+            return {"ok": True, "observed": cur}
+
+        # 2) Open value-help and pick exact label
+        try:
+            vhi_xpath = fields.EXCH_TYPE_INPUT_XPATH.replace("-inner", "-vhi")
+            vhi = el.wait_clickable(By.XPATH, vhi_xpath)
+            el.js_click(vhi)
+
+            WebDriverWait(self.driver, t).until(
+                EC.presence_of_element_located((By.XPATH,
+                    "//*[contains(@class,'sapMDialog') or contains(@class,'sapUiMdcValueHelpDialog') or contains(@class,'sapMPopup')]"))
+            )
+            exact_cell = WebDriverWait(self.driver, t).until(
+                EC.element_to_be_clickable((By.XPATH, f"//span[normalize-space(text())='{TARGET_EXCH_TYPE_LABEL}']"))
+            )
+            el.js_click(exact_cell)
+
+            # If value-help has an OK button, click it
+            try:
+                ok_btn = WebDriverWait(self.driver, 2).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[.//bdi[normalize-space()='OK'] or .//span[normalize-space()='OK']]"))
+                )
+                el.js_click(ok_btn)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        _blur(fields.EXCH_TYPE_INPUT_XPATH)
+        wait_ui5_idle(self.driver, timeout=t)
+        self._wait_not_busy(t)
+        cur = _get()
+        if cur == TARGET_EXCH_TYPE_LABEL:
+            return {"ok": True, "observed": cur}
+
+        return {"ok": False, "observed": cur, "why": "could_not_select_exact_label"}
+
+    # -------- App navigation (hardened) --------
+    def ensure_in_app(self, max_attempts: int = 2, settle_each: int = 8):
+        attempts = max(1, max_attempts)
+        listbar = ListToolbar(self.driver)
+        sidecol = SideColumnController(self.driver)
+
+        for _ in range(attempts):
+            cur = (self.driver.current_url or "")
+            if APP_HASH.lower() not in cur.lower():
+                self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
+
+            wait_ui5_idle(self.driver, timeout=max(self._el()._timeout, settle_each))
+            self._wait_not_busy(max(self._el()._timeout, settle_each))
+
+            sidecol.close_if_present(timeout=min(10, max(8, self._el()._timeout)))
+
+            try:
+                listbar.wait_create_clickable(timeout=max(60, self._el()._timeout))
+                self._app_ready_fast = True
+                return
+            except TimeoutException:
+                self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
+                time.sleep(0.5)
+
+        self._app_ready_fast = False
+        raise TimeoutException(f"ensure_in_app failed after {attempts} attempts.")
+
+    def ensure_in_app_quick(self):
+        if self._app_ready_fast:
+            try:
+                if ListToolbar(self.driver).is_at_list(quick=1.0):
+                    return
+            except Exception:
+                pass
+        self.ensure_in_app(max_attempts=3, settle_each=8)
+
+    def back_to_list(self):
+        listbar = ListToolbar(self.driver)
+        self.driver.execute_script("location.href = arguments[0];", self._app_root_url())
+        wait_ui5_idle(self.driver, timeout=max(self._el()._timeout, 20))
+        listbar.wait_create_clickable(timeout=max(60, self._el()._timeout))
+        self._app_ready_fast = True
+
+    # -------- Internal helpers --------
+    def _click_list_create(self, timeout: int | None = None):
+        listbar = ListToolbar(self.driver)
+        listbar.click_create(timeout or self._el()._timeout)
+        wait_ui5_idle(self.driver, timeout=timeout or self._el()._timeout)
+        self._wait_not_busy(timeout or self._el()._timeout)
+
+    def _read_last_toast_text(self) -> str:
+        return ToastReader(self.driver).read_last()
+
+    def _wait_object_header_ready(self, timeout: int) -> bool:
+        return ObjectHeaderVerifier(self.driver).wait_ready(timeout=timeout)
+
+    def _wait_for_success_toast_or_list(self, timeout: int) -> dict:
+        listbar = ListToolbar(self.driver)
+        dlg = DialogWatcher(self.driver)
+        end = time.time() + max(timeout, self._el()._timeout)
+        info = {"toast": "", "dialog": "", "at_list": False}
+        while time.time() < end:
+            if dlg.is_open():
+                info["dialog"] = dlg.text() or "Dialog open (no text captured)."
+                return info
+            txt = ToastReader(self.driver).read_last()
+            if txt:
+                info["toast"] = txt
+                lt = txt.lower()
+                if any(k in lt for k in ("created", "saved", "activated", "has been created", "successfully")):
+                    return info
+            try:
+                listbar.wait_create_clickable(timeout=0.8)
+                info["at_list"] = True
+                return info
+            except Exception:
+                pass
+            time.sleep(0.18)
+        return info
+
+    # -------- SOFT guard: ensure type contains 'M' (do not abort) --------
+    def _soft_ensure_exch_type_contains_M(self, fields: Fields, desired_exch_type: str) -> dict:
+        """
+        Ensure the Exchange Rate Type *contains* 'M' BEFORE clicking Create,
+        but do NOT abort the row pre-commit.
+        """
+        def _get():
+            try:
+                return _retry_stale(lambda: (fields.get_input_value(fields.EXCH_TYPE_INPUT_XPATH) or "").strip())
+            except Exception:
+                return ""
+
+        cur = _get()
+        if "m" in cur.lower():
+            return {"ok": True, "observed": cur}
+
+        # corrective retype
+        try:
+            fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, desired_exch_type, press_enter=True)
+        except Exception:
+            pass
+        # explicit blur to fire change bindings
+        try:
+            self.driver.execute_script(
+                """
+                try{
+                  var el=document.evaluate(arguments[0],document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;
+                  if (el){ el.dispatchEvent(new Event('change',{bubbles:true})); el.blur&&el.blur(); }
+                }catch(e){}
+                """,
+                fields.EXCH_TYPE_INPUT_XPATH
+            )
+        except Exception:
+            pass
+
+        wait_ui5_idle(self.driver, timeout=self._el()._timeout)
+        self._wait_not_busy(self._el()._timeout)
+
+        cur2 = _get()
+        return {"ok": ("m" in cur2.lower()), "observed": cur2}
+
+    # ---------------- NEW helpers for your policy ----------------
+    def _detect_lock_info(self, text: str) -> dict | None:
+        if not text:
+            return None
+        low = text.lower()
+        if "locked by user" in low and "table" in low and "tcurr" in low:
+            m = re.search(r"Table\s+(\w+)\s+is\s+locked\s+by\s+user\s+([A-Za-z0-9_]+)", text, re.IGNORECASE)
+            table = None
+            owner = None
+            if m:
+                table = m.group(1)
+                owner = m.group(2)
+            return {"table": table or "TCURR", "owner": owner or ""}
+        return None
+
+    def _is_required_fields_dialog(self, s: str) -> bool:
+        return "fill out all required entry fields" in (s or "").lower()
+
+    def _is_duplicate_exists(self, s: str) -> bool:
+        low = (s or "").lower()
+        return ("exchange rate" in low) and ("already exists in the system" in low)
+
+    # -------- Public: create + submit --------
+    def create_entry_and_submit(
+        self,
+        exch_type: str,
+        from_ccy: str,
+        to_ccy: str,
+        valid_from_ddmmyyyy: str,     # IMPORTANT: pass DD.MM.YYYY
+        quotation: str,
+        rate_str: str,
+        commit_gate=None,
+    ) -> dict:
+        fields = Fields(self.driver)
+        factors = Factors(self.driver)
+        quote = QuotationField(self.driver)
+        rate = ExchangeRateField(self.driver)
+        footer = FooterActions(self.driver)
+        listbar = ListToolbar(self.driver)
+        dlg = DialogWatcher(self.driver)
+        sidecol = SideColumnController(self.driver)
+        validate = ValidationInspector(self.driver)
+
+        el = self._el()
+
+        # QUICK ensure to avoid heavy waits on every item
+        self.ensure_in_app_quick()
+
+        # ---------- local helpers ----------
+        def _noop_gate_ctx():
+            class _C:
+                def __enter__(self): return None
+                def __exit__(self, *a): return False
+            return _C()
+
+        def _verify_or_retype(xpath: str, expected: str) -> None:
+            if expected is None:
+                return
+            got = (fields.get_input_value(xpath) or "").strip()
+            if got.lower() != (expected or "").strip().lower():
+                fields.set_plain_input(xpath, expected, press_enter=True)
+                _ = fields.get_input_value(xpath)
+
+        def _verify_quotation(expected: str) -> None:
+            try:
+                cur = _retry_stale(lambda: (self.driver.find_element(By.XPATH, QUOTATION_INNER_INPUT_XPATH).get_attribute("value") or "").strip())
+            except Exception:
+                cur = ""
+            if cur.lower() != (expected or "").strip().lower():
+                quote.set_value(expected)
+
+        def _cleanup_draft_and_return(base: dict, status_override: str, reason: str, extra_notes: dict | None = None) -> dict:
+            out = dict(base or {})
+            if status_override:
+                out["status"] = status_override
+            try:
+                DialogWatcher(self.driver).close(timeout=1.2)
+            except Exception:
+                pass
+            try:
+                footer.close_message_popover_if_open(timeout=2)
+            except Exception:
+                pass
+            try:
+                discarded = footer.discard_draft(timeout=max(8, el._timeout))
+            except Exception:
+                discarded = False
+            try:
+                SideColumnController(self.driver).close_if_present(timeout=min(12, max(10, el._timeout)))
+            except Exception:
+                pass
+            try:
+                self.back_to_list()
+            except Exception:
+                pass
+            out["dialog_open"] = False
+            notes = dict(out.get("notes") or {})
+            notes.setdefault("cleanup_reason", reason)
+            notes["draft_discarded"] = notes.get("draft_discarded", False) or bool(discarded)
+            if extra_notes:
+                notes.update(extra_notes)
+            out["notes"] = notes
+            return out
+
+        def _fill_all_fields(prefer_ui5_for_rate: bool = False):
+            # 1) Exchange Rate Type
+            fields.set_plain_input(fields.EXCH_TYPE_INPUT_XPATH, exch_type, press_enter=True)
+            _verify_or_retype(fields.EXCH_TYPE_INPUT_XPATH, exch_type)
+
+            # 2) From Currency
+            fields.set_plain_input(fields.FROM_CCY_INPUT_XPATH, from_ccy, press_enter=True)
+            _verify_or_retype(fields.FROM_CCY_INPUT_XPATH, from_ccy)
+
+            # 3) To Currency
+            fields.set_plain_input(fields.TO_CCY_INPUT_XPATH, to_ccy, press_enter=True)
+            _verify_or_retype(fields.TO_CCY_INPUT_XPATH, to_ccy)
+
+            # 4) Valid From — **DD.MM.YYYY**
+            fields.set_plain_input(fields.VALID_FROM_INPUT_XPATH, valid_from_ddmmyyyy, press_enter=True)
+            _verify_or_retype(fields.VALID_FROM_INPUT_XPATH, valid_from_ddmmyyyy)
+
+            # 5) Quotation
+            quote.set_value(quotation)
+            _verify_quotation(quotation)
+
+            # 6) Factors and Rate
+            factors.try_set_from("1")
+            factors.try_set_to("1")
+            if prefer_ui5_for_rate:
+                rate.set_via_ui5(rate_str)
+                rate.commit(times=1)
+            else:
+                rate.set_via_typing(rate_str)
+                rate.commit(times=2)
+
+        def _looks_like_required_fields_issue(msgs: list[dict]) -> bool:
+            if not msgs:
+                return False
+            blob = " | ".join(
+                f"{(m.get('message') or '')} {m.get('description') or ''}".lower()
+                for m in msgs
+            )
+            keys = (
+                "fill out all required",
+                "required entry fields",
+                "required field",
+                "mandatory field",
+                "exchange rate type",
+                "from currency",
+            )
+            return any(k in blob for k in keys)
+
+        def _commit_flow_under_gate() -> dict:
+            gate_ctx = commit_gate() if callable(commit_gate) else _noop_gate_ctx()
+            with gate_ctx:
+                first_phase = footer.click_create(clicks=1)
+
+                header_ready = self._wait_object_header_ready(timeout=min(10, max(8, el._timeout)))
+                if header_ready:
+                    sidecol.close_if_present(timeout=min(12, max(10, el._timeout)))
+                    return {
+                        "status": "created",
+                        "footer_clicks": 1,
+                        "intermediate_toasts": first_phase.get("toasts", []),
+                        "toast": self._read_last_toast_text(),
+                        "at_list": True,
+                        "dialog_open": False,
+                        "dialog_text": "",
+                    }
+
+                loop_res = footer.ensure_created_by_loop_clicking(
+                    object_header_ready=lambda: self._wait_object_header_ready(timeout=4),
+                    at_list=lambda: listbar.is_at_list(quick=0.8),
+                    close_side=lambda: sidecol.close_if_present(timeout=max(8, el._timeout)),
+                    total_timeout=max(35, el._timeout),
+                    max_clicks=5,
+                )
+                if loop_res.get("status") in ("created", "dialog_open", "activation_error"):
+                    return loop_res
+
+                final_phase = self._wait_for_success_toast_or_list(timeout=max(el._timeout, 18))
+                if not final_phase.get("at_list"):
+                    sidecol.close_if_present(timeout=min(12, max(10, el._timeout)))
+
+                if final_phase.get("dialog"):
+                    return {
+                        "status": "dialog_open",
+                        "footer_clicks": 1 + loop_res.get("footer_clicks", 0),
+                        "intermediate_toasts": first_phase.get("toasts", []) + loop_res.get("intermediate_toasts", []),
+                        "toast": final_phase.get("toast", ""),
+                        "dialog_open": True,
+                        "dialog_text": final_phase.get("dialog", ""),
+                    }
+
+                status_guess = "created" if (
+                    final_phase.get("at_list")
+                    or (final_phase.get("toast") and any(k in final_phase.get("toast", "").lower()
+                        for k in ("created", "activated", "successfully")))
+                ) else "unknown"
+
+                if status_guess != "created":
+                    strict = footer.ensure_created_by_loop_clicking(
+                        object_header_ready=lambda: self._wait_object_header_ready(timeout=4),
+                        at_list=lambda: listbar.is_at_list(quick=0.8),
+                        close_side=lambda: sidecol.close_if_present(timeout=max(8, el._timeout)),
+                        total_timeout=max(30, el._timeout),
+                        max_clicks=5,
+                    )
+                    if strict.get("status") == "created":
+                        return strict
+
+                return {
+                    "status": status_guess,
+                    "footer_clicks": 1 + loop_res.get("footer_clicks", 0),
+                    "intermediate_toasts": first_phase.get("toasts", []) + loop_res.get("intermediate_toasts", []),
+                    "toast": final_phase.get("toast", ""),
+                    "at_list": True,
+                    "dialog_open": False,
+                    "dialog_text": "",
+                }
+
+        # 1) Open form
+        self._click_list_create(timeout=el._timeout)
+
+        # 2) Fill fields (DD.MM.YYYY is passed straight through)
+        _fill_all_fields(prefer_ui5_for_rate=False)
+
+        # 2.5) SOFT GUARD: ensure Exchange Rate Type *contains* "M"
+        m_check = self._soft_ensure_exch_type_contains_M(fields, exch_type)
+
+        # 3) Pre-submit validation (client)
+        err = ValidationInspector(self.driver).collect()
+        if err and "greater than zero" in (err or "").lower():
+            Factors(self.driver).try_set_from("1")
+            Factors(self.driver).try_set_to("1")
+            ExchangeRateField(self.driver).set_via_ui5(rate_str)
+            ExchangeRateField(self.driver).commit(times=1)
+            err = ValidationInspector(self.driver).collect()
+
+        # 4) COMMIT attempt
+        res = _commit_flow_under_gate()
+        status = (res.get("status") or "").lower()
+
+        # 5) Post-commit note if M was missing pre-commit
+        if not m_check.get("ok", True):
+            res.setdefault("notes", {})
+            res["notes"]["exch_type_missing_M_precommit"] = True
+            res["notes"]["observed_exch_type"] = m_check.get("observed", "")
+
+        # --- Build a combined message blob for policy checks
+        msgs_from_res = res.get("messages", []) or []
+        joined_msgs = " | ".join(f"{(m.get('message') or '')} {m.get('description') or ''}".strip() for m in msgs_from_res)
+        joined_all = " | ".join([res.get("dialog_text") or "", joined_msgs]).strip()
+
+        # *** NEW *** also read the Message Popover (this is where "already exists" lives)
+        pop_msgs = []
+        try:
+            pop_msgs = footer.open_and_read_messages(timeout=max(6, el._timeout))
+        except Exception:
+            pop_msgs = []
+        if pop_msgs:
+            # add to the joined blob for the same downstream checks
+            joined_all = " | ".join(filter(None, [joined_all, " | ".join(pop_msgs)]))
+        # close popover (so footer buttons stay clickable)
+        try:
+            footer.close_message_popover_if_open(timeout=3)
+        except Exception:
+            pass
+
+        # === POLICY REMAP ===
+        # TCURR lock anywhere → Pending (not Locked)
+        lock = self._detect_lock_info(joined_all)
+        if lock:
+            try: DialogWatcher(self.driver).close(timeout=1.0)
+            except Exception: pass
+            SideColumnController(self.driver).close_if_present(timeout=min(12, max(10, el._timeout)))
+            try: self.back_to_list()
+            except Exception: pass
+            return {
+                "status": "pending",
+                "dialog_open": False,
+                "dialog_text": res.get("dialog_text", ""),
+                "notes": {
+                    "lock_table": lock.get("table", "TCURR"),
+                    "lock_owner": lock.get("owner", ""),
+                    "reason": "table_lock_tcurr"
+                }
+            }
+
+        # Duplicate exists → Skipped **AND discard draft** (new behavior)
+        # keep your existing detector, but now it sees popover text too
+        if self._is_duplicate_exists(joined_all) or ("already exists" in joined_all.lower()):
+            # close any popover/dialog so the footer is clickable
+            try: DialogWatcher(self.driver).close(timeout=1.2)
+            except Exception: pass
+            try: footer.close_message_popover_if_open(timeout=2)
+            except Exception: pass
+
+            # attempt to discard the draft quietly
+            try:
+                _discarded = footer.discard_draft(timeout=max(8, el._timeout))
+            except Exception:
+                _discarded = False
+
+            # close side column (no-op if already closed) and go back to list
+            SideColumnController(self.driver).close_if_present(timeout=min(12, max(10, el._timeout)))
+            try: self.back_to_list()
+            except Exception: pass
+
+            out = {
+                "status": "skipped",
+                "dialog_open": False,
+                "dialog_text": res.get("dialog_text", ""),
+                "notes": {
+                    "already_existed": True,
+                    "draft_discarded": bool(_discarded),
+                    "message_count": len(pop_msgs) if pop_msgs else len(msgs_from_res),
+                },
+            }
+            return out
+
+        required_issue = _looks_like_required_fields_issue(msgs_from_res) or ("required" in joined_all.lower())
+        if required_issue:
+            extra = {
+                "required_fields_detected": True,
+                "message_count": len(pop_msgs) if pop_msgs else len(msgs_from_res),
+            }
+            cleaned = _cleanup_draft_and_return(res, "error", "required_fields", extra)
+            return cleaned
+
+        # Created passes through as Created (runner/worker mapping unchanged)
+        if status == "created":
+            return res
+
+        # Unknown: re-queue ? map to 'pending'
+        if status == "unknown":
+            res["status"] = "pending"
+            return res
+
+        # For any other status ensure draft is cleared before returning
+        cleaned_default = _cleanup_draft_and_return(res, status or "error", "non_success")
+        return cleaned_default
+
+    def create_rate(
+        self,
+        exch_type: str,
+        from_ccy: str,
+        to_ccy: str | None = None,
+        valid_from_mmddyyyy: str = "",
+        quotation: str = "",
+        rate_value: str | float = "",
+        to_cy: str | None = None,
+        commit_gate=None,
+    ) -> dict:
+        """
+        NOTE: pass date in **DD.MM.YYYY**. We DO NOT convert here.
+        services.schemas.ExchangeRateItem already normalizes to DD.MM.YYYY.
+        """
+        if to_ccy is None and to_cy is not None:
+            to_ccy = to_cy
+        if to_ccy is None:
+            raise TypeError("create_rate() missing required argument: 'to_ccy'")
+
+        valid_from_ddmmyyyy = valid_from_mmddyyyy
+
+        return self.create_entry_and_submit(
+            exch_type=exch_type,
+            from_ccy=from_ccy,
+            to_ccy=to_ccy,
+            valid_from_ddmmyyyy=valid_from_ddmmyyyy,   # typed as-is
+            quotation=quotation,
+            rate_str=str(rate_value),
+            commit_gate=commit_gate,
+        )
+
+
+# CurrencyExchangeRates\selectors.py
+
+# pages/CurrencyExchangeRates/selectors.py
+APP_HASH = "#Currency-maintainExchangeRates"
+
+
+# CurrencyExchangeRates\__init__.py
+
+
+
+# Index\page.py
+
+# pages/Index/page.py
+from core.base import Page
+from services.ui import wait_ui5_idle
+from .PurchasingTab.element import PurchasingTab
+from .ProcurementOverviewTile.element import ProcurementOverviewTile
+
+class IndexPage(Page):
+    """Fiori Launchpad 'Shell-home' landing."""
+
+    def ensure_home(self):
+        wait_ui5_idle(self.driver)
+
+    def to_purchasing(self):
+        PurchasingTab(self.driver).click()
+        wait_ui5_idle(self.driver)
+
+    def open_procurement_overview(self):
+        ProcurementOverviewTile(self.driver).click()
+        wait_ui5_idle(self.driver)
+
+
+# Index\__init__.py
+
+
+
+# Login\page.py
+
+from core.base import Page
+from services.config import config
+from .elements.Username.element import Username
+from .elements.Password.element import Password
+from .elements.Submit.element import Submit
+
+class LoginPage(Page):
+    def go(self):
+        self.open(config()["SAP_URL"])
+
+    def login(self, username: str, password: str):
+        self.go()
+        Username(self.driver).set(username)
+        Password(self.driver).set(password)
+        Submit(self.driver).click()
+        # Post-click, S/4HANA may keep same URL but replace DOM; verification is in services.ui
+
+
+# Login\temp.ipynb  (code cells only)
+
+# ── cell 1 ──
+from pathlib import Path, PurePosixPath
+import json
+
+MAX_READ_BYTES = 200_000
+SKIP_DIRS      = {'__pycache__', '.git', '.vscode', 'node_modules', 'venv', 'env', 'tmp_streamlit'}
+IGNORED_EXTS   = {
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.svg',
+    '.pdf', '.joblib'
+}
+PATHS_ONLY_EXT = {'.txt', '.csv', '.json'}         # list names, no content
+
+def _tree(root: Path) -> str:
+    """ASCII tree of *root*, skipping SKIP_DIRS and IGNORED_EXTS files."""
+    lines, stack = [root.name], []
+
+    def walk(cur: Path):
+        kids = [
+            p for p in cur.iterdir()
+            if p.name not in SKIP_DIRS
+            and not (p.is_file() and p.suffix.lower() in IGNORED_EXTS)
+        ]
+        kids.sort(key=lambda p: (p.is_file(), p.name.lower()))
+        for i, kid in enumerate(kids):
+            connector = "└── " if i == len(kids) - 1 else "├── "
+            lines.append(''.join(stack) + connector + kid.name)
+            if kid.is_dir():
+                stack.append('    ' if i == len(kids) - 1 else '│   ')
+                walk(kid)
+                stack.pop()
+    walk(root)
+    return '\n'.join(lines)
+
+def _extract_ipynb_code(nb_path: Path) -> str:
+    """Return concatenated source of code cells from a notebook."""
+    try:
+        nb_json = json.loads(nb_path.read_text(encoding='utf‑8'))
+        cells   = nb_json.get('cells', [])
+        code_blocks = []
+        for idx, cell in enumerate(cells, 1):
+            if cell.get('cell_type') == 'code':
+                src = ''.join(cell.get('source', ''))
+                code_blocks.append(f"# ── cell {idx} ──\n{src}")
+        return '\n\n'.join(code_blocks) or '[Notebook contains no code cells]'
+    except Exception as exc:
+        return f"[Could not read notebook: {exc}]"
+
+def _dump(root: Path) -> str:
+    out_lines, listed_only = [], []
+
+    for path in root.rglob('*'):
+        if path.is_dir() or any(p.name in SKIP_DIRS for p in path.parents):
+            continue
+        ext = path.suffix.lower()
+        if ext in IGNORED_EXTS:
+            continue                      # ignore images/PDFs/etc.
+
+        rel = path.relative_to(root)
+
+        # .txt / .csv / .json  → list name only
+        if ext in PATHS_ONLY_EXT:
+            listed_only.append(rel)
+            continue
+
+        # .ipynb  → dump only code cells
+        if ext == '.ipynb':
+            out_lines.append(f"\n# {rel}  (code cells only)\n")
+            out_lines.append(_extract_ipynb_code(path))
+            continue
+
+        # everything else → dump file content
+        out_lines.append(f"\n# {rel}\n")
+        try:
+            text = path.read_text('utf‑8', errors='replace')
+            if len(text) > MAX_READ_BYTES:
+                text = text[:MAX_READ_BYTES] + "\n[...TRUNCATED...]"
+            out_lines.append(text)
+        except Exception as exc:
+            out_lines.append(f"[Could not read file: {exc}]")
+
+    if listed_only:
+        out_lines.append("\n## .txt / .csv / .json files (names only)\n")
+        out_lines.extend(map(str, listed_only))
+
+    return '\n'.join(out_lines)
+
+def build_dir_report(root='.', out_file='dir_report.txt', show=True) -> str:
+    root = Path(root or '.').expanduser().resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(root)
+
+    report = (
+        "================  DIRECTORY TREE  ================\n"
+        + _tree(root)
+        + "\n\n================  FILE CONTENTS  =================\n"
+        + _dump(root)
+    )
+
+    Path(out_file).write_text(report, encoding='utf‑8')
+    if show:
+        print(report)
+        print(f"\nReport saved to {out_file}")
+    return report
+
+
+rep_text = build_dir_report(out_file="snapshot.txt", show=False)
+
+
+# Login\__init__.py
+
+
+
+# Shell\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\Dialog\element.py
+
+# pages/CurrencyExchangeRates/elements/Dialog/element.py
+from __future__ import annotations
+
+from typing import Optional
+import time
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import (
+    TimeoutException,
+    StaleElementReferenceException,
+    NoSuchElementException,
+)
+
+from core.base import Element
+
+# Robust selectors for the Message Popover
+_POPOVER_WRAPPER_CSS = ".sapMPopoverWrapper"
+_POPOVER_CONT_CSS    = ".sapMPopoverCont"
+_CLOSE_BTN_CSS       = "button.sapMMsgPopoverCloseBtn"   # the “X” button
+# Title/span for message text (works for list view items)
+_MSG_ITEM_TITLE_XP   = "//li[contains(@class,'sapMMsgViewItem')]" \
+                        "//span[contains(@id,'-titleText')]"
+
+# Generic dialog “Close” button by visible text
+_CLOSE_BDI_BTN_XP    = "//bdi[normalize-space()='Close']/ancestor::button[1] | //button[.//bdi[normalize-space()='Close']]"
+# Generic OK button (fallbacks)
+_OK_BDI_BTN_XP       = "//bdi[normalize-space()='OK']/ancestor::button[1] | //button[.//bdi[normalize-space()='OK']]"
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+
+class DialogWatcher:
+    """
+    Handles both classic sap.m.Dialog and the Message Popover.
+    Now also knows how to click a <bdi>Close</bdi> button exactly like:
+      <span class="sapMBtnContent"><bdi>Close</bdi></span>
+    """
+
+    def __init__(self, driver):
+        self.driver = driver
+        self._el = Element(driver)
+
+    # ---------- basic checks ----------
+    def _any_popover_present(self) -> bool:
+        def _see():
+            els = self.driver.find_elements(By.CSS_SELECTOR, _POPOVER_WRAPPER_CSS)
+            return any((e.is_displayed() for e in els))
+        try:
+            return _retry_stale(_see)
+        except Exception:
+            return False
+
+    def is_open(self) -> bool:
+        if self._any_popover_present():
+            return True
+        try:
+            return _retry_stale(lambda: any(b.is_displayed() for b in self.driver.find_elements(By.XPATH, _CLOSE_BDI_BTN_XP)))
+        except Exception:
+            pass
+        try:
+            return _retry_stale(lambda: any(b.is_displayed() for b in self.driver.find_elements(By.XPATH, _OK_BDI_BTN_XP)))
+        except Exception:
+            pass
+        return False
+
+    # ---------- text scraping ----------
+    def text(self, timeout: float = 0.5) -> str:
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                el = WebDriverWait(self.driver, 0.25, ignored_exceptions=(StaleElementReferenceException,)).until(
+                    EC.presence_of_element_located((By.XPATH, _MSG_ITEM_TITLE_XP))
+                )
+                if el.is_displayed():
+                    try:
+                        return el.text.strip()
+                    except StaleElementReferenceException:
+                        pass
+                break
+            except Exception:
+                pass
+        try:
+            return (self.driver.execute_script("""
+                try{
+                  var dlg = document.querySelector("div[role='dialog']");
+                  if(!dlg) return '';
+                  var h = dlg.querySelector(".sapMDialogTitle, .sapMTitle, [role='heading']");
+                  return (h && (h.innerText||h.textContent)||'').trim();
+                }catch(e){ return ''; }
+            """) or "").strip()
+        except Exception:
+            return ""
+
+    # ---------- close helpers ----------
+    def _try_click_close_button_once(self) -> bool:
+        try:
+            pops = self.driver.find_elements(By.CSS_SELECTOR, _POPOVER_WRAPPER_CSS)
+            for pop in pops:
+                try:
+                    if not pop.is_displayed():
+                        continue
+                except StaleElementReferenceException:
+                    continue
+                try:
+                    btn = pop.find_element(By.CSS_SELECTOR, _CLOSE_BTN_CSS)
+                except NoSuchElementException:
+                    try:
+                        btns = self.driver.find_elements(By.CSS_SELECTOR, _CLOSE_BTN_CSS)
+                        btn  = next((b for b in btns if b.is_displayed()), None)
+                    except StaleElementReferenceException:
+                        btn = None
+                if btn:
+                    try:
+                        self._el.js_click(btn)
+                        return True
+                    except StaleElementReferenceException:
+                        pass
+        except StaleElementReferenceException:
+            return False
+        except Exception:
+            return False
+        return False
+
+    def _js_fallback_close_all_popovers(self) -> bool:
+        try:
+            return bool(self.driver.execute_script("""
+                try{
+                  var closed = 0;
+                  document.querySelectorAll('button.sapMMsgPopoverCloseBtn').forEach(function(b){
+                    try{
+                      var r = b.getBoundingClientRect();
+                      var visible = !!(r.width || r.height) && window.getComputedStyle(b).visibility !== 'hidden';
+                      if (visible) { b.click(); closed++; }
+                    }catch(e){}
+                  });
+                  return closed > 0;
+                }catch(e){ return false; }
+            """))
+        except Exception:
+            return False
+
+    def _click_bdi_close(self) -> bool:
+        try:
+            btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.XPATH, _CLOSE_BDI_BTN_XP))
+            )
+            try:
+                self._el.js_click(btn)
+            except Exception:
+                try:
+                    btn.click()
+                except Exception:
+                    pass
+            return True
+        except Exception:
+            return False
+
+    def _click_ok(self) -> bool:
+        try:
+            btn = WebDriverWait(self.driver, 1.0, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.XPATH, _OK_BDI_BTN_XP))
+            )
+            try:
+                self._el.js_click(btn)
+            except Exception:
+                try:
+                    btn.click()
+                except Exception:
+                    pass
+            return True
+        except Exception:
+            return False
+
+    # ---------- public API ----------
+    def close(self, timeout: float = 2.0) -> bool:
+        end = time.time() + max(0.2, timeout)
+
+        while time.time() < end:
+            # Popover?
+            if self._any_popover_present():
+                for _ in (1, 2):
+                    if self._try_click_close_button_once():
+                        try:
+                            WebDriverWait(self.driver, 0.5, ignored_exceptions=(StaleElementReferenceException,)).until_not(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, _POPOVER_WRAPPER_CSS))
+                            )
+                        except Exception:
+                            pass
+                        if not self._any_popover_present():
+                            return True
+                if self._js_fallback_close_all_popovers():
+                    try:
+                        WebDriverWait(self.driver, 0.5, ignored_exceptions=(StaleElementReferenceException,)).until_not(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, _POPOVER_WRAPPER_CSS))
+                        )
+                    except Exception:
+                        pass
+                    if not self._any_popover_present():
+                        return True
+
+            # Dialog “Close”
+            if self._click_bdi_close():
+                time.sleep(0.15)
+                if not self.is_open():
+                    return True
+
+            # Dialog “OK” fallback
+            if self._click_ok():
+                time.sleep(0.15)
+                if not self.is_open():
+                    return True
+
+            time.sleep(0.12)
+
+        return not self.is_open()
+
+
+# CurrencyExchangeRates\elements\Dialog\selectors.py
+
+# Generic dialog root
+DIALOG_ROOT_CSS = "div[role='dialog']"
+
+
+# CurrencyExchangeRates\elements\Dialog\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\DraftFinder\element.py
+
+# pages/CurrencyExchangeRates/elements/DraftFinder/element.py
+from __future__ import annotations
+
+import time
+import logging
+from logging.handlers import RotatingFileHandler
+from typing import List, Tuple
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import (
+    StaleElementReferenceException,
+    TimeoutException,
+    ElementClickInterceptedException,
+    ElementNotInteractableException,
+)
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+
+def _ensure_logger() -> logging.Logger:
+    log = logging.getLogger("sapbot.ui.drafts")
+    if not log.handlers:
+        log.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] drafts %(message)s"))
+        log.addHandler(ch)
+        log_dir = Path("WebService") / "logs"
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        fh = RotatingFileHandler(log_dir / "sapbot.log", maxBytes=2_000_000, backupCount=5, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s %(message)s"))
+        log.addHandler(fh)
+    return log
+
+from pathlib import Path
+log = _ensure_logger()
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+
+# ---------- Selectors (robust by suffix/text) ----------
+DATE_INPUT_INNER_XP = (
+    "//input[substring(@id,string-length(@id)-string-length("
+    "'ExchangeRateEffectiveDateFoEd-input-inner')+1)='ExchangeRateEffectiveDateFoEd-input-inner']"
+)
+
+ROW_XP = "//main//table//tbody/tr[contains(@id,'ListReportTable:::ColumnListItem')]"
+ROW_IS_DRAFT_REL_XP = (
+    "./td[8]//a[contains(@id,'DraftObjectMarker')]"
+    "[.//span[contains(normalize-space(),'Draft')]]"
+)
+ROW_CHECKBOX_REL_XP = (
+    ".//*[@role='checkbox' and (contains(@id,'selectMulti') or contains(@class,'sapMCb'))]"
+    " | .//div[contains(@class,'sapMCb') and contains(@id,'selectMulti')]"
+)
+LIST_DELETE_BTN_XP = (
+    "//button[substring(@id,string-length(@id)-string-length('--deleteEntry')+1)='--deleteEntry']"
+    " | //bdi[normalize-space()='Delete']/ancestor::button[1]"
+)
+
+DIALOG_ROOT_XP = "//div[@role='alertdialog' or contains(@class,'sapMDialog')]"
+DIALOG_DELETE_BTN_XP = (
+    "("
+    "//div[@role='alertdialog' or contains(@class,'sapMDialog')]"
+    "//button[.//bdi[normalize-space()='Delete']]"
+    ")[last()]"
+)
+
+
+class DraftFinder(Element):
+    """
+    UI helper to:
+      - Set the List Report 'Exchange Rate Effective Date' and APPLY (Enter)
+      - Wait until table rows are (re)loaded
+      - Pre-scroll a couple times to trigger initial row rendering
+      - Detect draft rows
+      - Delete draft rows (check → Delete → confirm)
+    """
+
+    # ---------- Date filter ----------
+    def set_effective_date_and_apply(self, dd_mm_yyyy: str, timeout: int = 20) -> bool:
+        log.info("drafts: set filter date → %s", dd_mm_yyyy)
+        wait = WebDriverWait(self.driver, timeout)
+        try:
+            inp = wait.until(EC.element_to_be_clickable((By.XPATH, DATE_INPUT_INNER_XP)))
+        except TimeoutException:
+            log.error("drafts: date input not clickable (timeout=%s)", timeout)
+            return False
+
+        def _focus():
+            try:
+                self.js_click(inp)
+            except Exception:
+                inp.click()
+
+        _retry_stale(_focus)
+        # Hard clear
+        for fn in (
+            lambda: inp.clear(),
+            lambda: inp.send_keys(Keys.CONTROL, "a"),
+            lambda: inp.send_keys(Keys.DELETE),
+        ):
+            try:
+                _retry_stale(fn)
+            except Exception:
+                pass
+
+        _retry_stale(lambda: inp.send_keys(dd_mm_yyyy))
+        _retry_stale(lambda: inp.send_keys(Keys.ENTER))  # APPLY
+        # tiny blur to ensure binding fires
+        try:
+            self.driver.execute_script(
+                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));"
+                "arguments[0].blur && arguments[0].blur();",
+                inp,
+            )
+        except Exception:
+            pass
+
+        wait_ui5_idle(self.driver, timeout=max(8, timeout))
+        time.sleep(0.2)
+        log.debug("drafts: date applied, waiting rows to (re)load")
+        return True
+
+    # ---------- Table readiness ----------
+    def wait_rows_loaded(self, timeout: int = 12) -> bool:
+        end = time.time() + max(1, timeout)
+        while time.time() < end:
+            try:
+                rows = self.driver.find_elements(By.XPATH, ROW_XP)
+                if rows:
+                    log.info("drafts: table shows %d row element(s) (initial read)", len(rows))
+                    return True
+            except Exception:
+                pass
+            wait_ui5_idle(self.driver, timeout=2)
+            time.sleep(0.15)
+        log.info("drafts: no visible rows; proceeding anyway")
+        return True
+
+    # ---------- Scrolling ----------
+    def pre_scroll(self, times: int = 2, settle: float = 0.4):
+        log.debug("drafts: pre_scroll times=%s", times)
+        try:
+            body = self.driver.find_element(By.TAG_NAME, "body")
+        except Exception:
+            return
+        for _ in range(max(0, int(times))):
+            try:
+                body.send_keys(Keys.PAGE_DOWN)
+            except Exception:
+                pass
+            wait_ui5_idle(self.driver, timeout=6)
+            time.sleep(settle)
+
+    # ---------- Rows & Draft detection ----------
+    def _rows_now(self):
+        return self.driver.find_elements(By.XPATH, ROW_XP)
+
+    def visible_draft_rows(self) -> List:
+        rows = self._rows_now()
+        out = []
+        for r in rows:
+            try:
+                if r.find_elements(By.XPATH, ROW_IS_DRAFT_REL_XP):
+                    out.append(r)
+            except StaleElementReferenceException:
+                continue
+        log.info("drafts: visible draft rows=%d", len(out))
+        return out
+
+    # ---------- Delete helpers ----------
+    def _tick_row_checkbox(self, row) -> bool:
+        try:
+            cb = row.find_element(By.XPATH, ROW_CHECKBOX_REL_XP)
+        except Exception:
+            log.debug("drafts: row checkbox not found")
+            return False
+
+        def _scroll_into_view(el):
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+            except Exception:
+                pass
+
+        def _checked() -> bool:
+            try:
+                state = (cb.get_attribute("aria-checked") or "").strip().lower()
+                if state == "true":
+                    return True
+                inner = None
+                try:
+                    inner = cb.find_element(By.XPATH, ".//*[@aria-checked]")
+                except Exception:
+                    inner = None
+                if inner:
+                    st2 = (inner.get_attribute("aria-checked") or "").strip().lower()
+                    return st2 == "true"
+                return False
+            except Exception:
+                return False
+
+        if _checked():
+            log.debug("drafts: checkbox already checked")
+            return True
+
+        _scroll_into_view(row)
+        _scroll_into_view(cb)
+        try:
+            self.js_click(cb)
+            how = "js"
+        except Exception:
+            how = "native?"
+        time.sleep(0.05)
+        if _checked():
+            log.debug("drafts: checkbox checked (%s)", how)
+            return True
+
+        try:
+            cb.click()
+        except (ElementClickInterceptedException, ElementNotInteractableException):
+            pass
+        except Exception:
+            pass
+        time.sleep(0.05)
+        if _checked():
+            log.debug("drafts: checkbox checked (native)")
+            return True
+
+        try:
+            row.click()
+        except Exception:
+            pass
+        try:
+            row.send_keys(Keys.SPACE)
+        except Exception:
+            pass
+        time.sleep(0.08)
+        if _checked():
+            log.debug("drafts: checkbox checked (SPACE)")
+            return True
+
+        try:
+            first_cell = row.find_element(By.XPATH, "./td[1]")
+            _scroll_into_view(first_cell)
+            try:
+                self.js_click(first_cell)
+            except Exception:
+                try:
+                    first_cell.click()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        time.sleep(0.08)
+        ok = _checked()
+        log.debug("drafts: checkbox final state=%s", ok)
+        return ok
+
+    def _click_list_delete(self, timeout: int = 8) -> bool:
+        try:
+            btn = WebDriverWait(self.driver, timeout).until(
+                EC.element_to_be_clickable((By.XPATH, LIST_DELETE_BTN_XP))
+            )
+        except TimeoutException:
+            log.error("drafts: list Delete button not clickable")
+            return False
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+        except Exception:
+            pass
+        try:
+            btn.click()
+            how = "native"
+        except Exception:
+            try:
+                self.js_click(btn)
+                how = "js"
+            except Exception:
+                log.error("drafts: could not click list Delete")
+                return False
+        log.info("drafts: clicked list Delete (%s)", how)
+        wait_ui5_idle(self.driver, timeout=timeout)
+        return True
+
+    def _confirm_dialog_delete(self, timeout: int = 12) -> bool:
+        try:
+            WebDriverWait(self.driver, min(6, timeout)).until(
+                EC.presence_of_element_located((By.XPATH, DIALOG_ROOT_XP))
+            )
+        except TimeoutException:
+            log.debug("drafts: no explicit confirm dialog (maybe auto-confirm)")
+            # continue
+
+        try:
+            btn = WebDriverWait(self.driver, timeout).until(
+                EC.element_to_be_clickable((By.XPATH, DIALOG_DELETE_BTN_XP))
+            )
+        except TimeoutException:
+            log.error("drafts: confirm Delete button not found")
+            return False
+
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+        except Exception:
+            pass
+        try:
+            btn.click()
+            how = "native"
+        except Exception:
+            try:
+                self.js_click(btn)
+                how = "js"
+            except Exception:
+                log.error("drafts: failed to click confirm Delete")
+                return False
+
+        log.info("drafts: confirmed Delete (%s)", how)
+        wait_ui5_idle(self.driver, timeout=timeout)
+        try:
+            WebDriverWait(self.driver, min(6, timeout)).until_not(
+                EC.presence_of_element_located((By.XPATH, DIALOG_ROOT_XP))
+            )
+        except Exception:
+            pass
+        return True
+
+    # ---------- Public: delete all visible drafts ----------
+    def delete_visible_drafts(self, per_click_timeout: int = 12):
+        """
+        Returns (deleted_count, attempts, deleted_sample:list[str])
+        """
+        deleted = 0
+        attempts = 0
+        sample: list[str] = []
+
+        log.info("drafts: starting deletion loop (timeout per step=%s)", per_click_timeout)
+
+        while True:
+            drafts = self.visible_draft_rows()
+            if not drafts:
+                log.info("drafts: no more draft rows visible → stop")
+                break
+
+            row = drafts[0]
+            attempts += 1
+
+            try:
+                from_ccy = (row.find_element(By.XPATH, "./td[2]").text or "").strip()
+                to_ccy   = (row.find_element(By.XPATH, "./td[3]").text or "").strip()
+                date_txt = (row.find_element(By.XPATH, "./td[4]").text or "").strip()
+                label = f"{from_ccy}->{to_ccy} @ {date_txt}"
+            except Exception:
+                label = "draft-row"
+            log.info("drafts: attempt=%d deleting %s", attempts, label)
+
+            if not self._tick_row_checkbox(row):
+                log.warning("drafts: could not tick checkbox; refreshing rows")
+                wait_ui5_idle(self.driver, timeout=4)
+                time.sleep(0.2)
+                continue
+
+            if not self._click_list_delete(timeout=per_click_timeout):
+                log.warning("drafts: list Delete click failed; retrying loop")
+                continue
+
+            if self._confirm_dialog_delete(timeout=per_click_timeout):
+                deleted += 1
+                if len(sample) < 10:
+                    sample.append(label)
+                log.info("drafts: deleted OK (%s) | total deleted=%d", label, deleted)
+            else:
+                log.error("drafts: confirm delete failed for %s", label)
+
+            wait_ui5_idle(self.driver, timeout=per_click_timeout)
+            time.sleep(0.25)
+
+        log.info("drafts: loop complete → deleted=%d attempts=%d", deleted, attempts)
+        return deleted, attempts, sample
+
+
+# CurrencyExchangeRates\elements\DraftFinder\selectors.py
+
+# XPaths & ID suffixes used by DraftFinder
+
+# Table rows in the List Report
+ROWS_XPATH = ("//main//table//tbody"
+              "/tr[contains(@id,'ListReportTable:::ColumnListItem')]")
+
+# A row is Draft if col 8 contains the Draft marker link
+DRAFT_MARKER_REL_XP = (
+    "./td[8]//a[contains(@id,'DraftObjectMarker')"
+    " and .//span[contains(normalize-space(),'Draft')]]"
+)
+
+# Row checkbox (multi-select) — works from the row root
+ROW_CHECKBOX_REL_XP = (
+    ".//div[contains(@id,'-selectMulti') and contains(@class,'sapMCb')]"
+)
+
+# List-level “Delete” button (toolbar)
+LIST_DELETE_BTN_SUFFIX = "--deleteEntry"
+
+# Delete confirmation dialog + its Delete button
+CONFIRM_DIALOG_ROLE = "alertdialog"
+CONFIRM_DELETE_BTN_XP = (
+    "//button[.//bdi[normalize-space()='Delete']]"
+    " | //bdi[normalize-space()='Delete']/ancestor::button[1]"
+)
+
+
+# CurrencyExchangeRates\elements\DraftFinder\__init__.py
+
+# export DraftFinder for dotted imports
+from .element import DraftFinder
+
+__all__ = ["DraftFinder"]
+
+
+# CurrencyExchangeRates\elements\ExcelExport\element.py
+
+# pages/CurrencyExchangeRates/elements/ExcelExport/element.py
+from __future__ import annotations
+
+import time
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+from .selectors import (
+    EXPORT_SPLIT_BTN_IMG_ID_SUFFIX,
+    EXPORT_BTN_GENERIC_XP,
+)
+
+# -------------------- logging --------------------
+def _ensure_logger() -> logging.Logger:
+    log = logging.getLogger("sapbot.ui.excel")
+    if not log.handlers:
+        log.setLevel(logging.DEBUG)
+        # console
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] excel %(message)s"))
+        log.addHandler(ch)
+        # rotating file
+        log_dir = Path("WebService") / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        fh = RotatingFileHandler(log_dir / "sapbot.log", maxBytes=2_000_000, backupCount=5, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s %(message)s"))
+        log.addHandler(fh)
+    return log
+
+log = _ensure_logger()
+# -------------------------------------------------
+
+
+class ExcelExporter(Element):
+    """
+    Clicks the ListReport 'Export' action and waits for an .xlsx file to appear
+    in the provided download directory.
+
+    Returns (xlsx_path, size_bytes) on success, or (None, 0) on failure.
+    """
+
+    # -------------------- UI helpers --------------------
+
+    def _click_export_button(self, timeout: int = 15) -> bool:
+        log.info("export: trying to click Export (timeout=%s)", timeout)
+
+        # 1) Try via the icon <span> id suffix, then click its owning button
+        try:
+            log.debug("export: probing icon suffix %r", EXPORT_SPLIT_BTN_IMG_ID_SUFFIX)
+            btn_id = self.driver.execute_script(
+                """
+                var suf = arguments[0];
+                var nodes = document.querySelectorAll('[id$="'+suf+'"]');
+                function visible(el){
+                  if(!el) return false;
+                  var cs=getComputedStyle(el);
+                  if(cs.display==='none'||cs.visibility==='hidden') return false;
+                  var r=el.getBoundingClientRect();
+                  return (r.width>0 && r.height>0);
+                }
+                for (var i=nodes.length-1;i>=0;i--){
+                  var el=nodes[i]; if(!visible(el)) continue;
+                  var btn = el.closest('button');
+                  if(btn) return btn.id;
+                }
+                return null;
+                """,
+                EXPORT_SPLIT_BTN_IMG_ID_SUFFIX
+            )
+            log.debug("export: icon-suffix → btn_id=%r", btn_id)
+            if btn_id:
+                btn = WebDriverWait(self.driver, timeout).until(
+                    EC.element_to_be_clickable((By.ID, btn_id))
+                )
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                except Exception:
+                    pass
+                try:
+                    btn.click()
+                    how = "native-click"
+                except Exception:
+                    self.js_click(btn)
+                    how = "js-click"
+                log.info("export: clicked split-button via id=%s (%s)", btn_id, how)
+                wait_ui5_idle(self.driver, timeout=timeout)
+                return True
+        except Exception as e:
+            log.debug("export: split-button path failed: %s: %s", type(e).__name__, e)
+
+        # 2) Fallbacks by label/aria/title/xpath
+        variants = [
+            EXPORT_BTN_GENERIC_XP,
+            "//button[.//bdi[contains(normalize-space(),'Export to Spreadsheet')]]",
+            "//button[.//bdi[normalize-space()='Export']]",
+            "//button[@aria-label='Export' or @title='Export']",
+            "//button[contains(@id,'btnExcelExport')]",
+        ]
+        for xp in variants:
+            try:
+                log.debug("export: trying xpath: %s", xp)
+                btn = WebDriverWait(self.driver, 3).until(
+                    EC.element_to_be_clickable((By.XPATH, xp))
+                )
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                except Exception:
+                    pass
+                try:
+                    btn.click()
+                    how = "native"
+                except Exception:
+                    self.js_click(btn)
+                    how = "js"
+                log.info("export: clicked Export via xpath (%s)", how)
+                wait_ui5_idle(self.driver, timeout=timeout)
+                return True
+            except Exception as e:
+                log.debug("export: xpath failed: %s", e)
+
+        log.warning("export: could not find any clickable Export button")
+        return False
+
+    def _maybe_click_menu_item(self) -> None:
+        """
+        Some UIs open a mini menu after the split button.
+        Try a couple of common menu item locators.
+        """
+        try:
+            for xp in (
+                "//div[contains(@class,'sapMSelectList') or contains(@class,'sapMList')]//span[normalize-space()='Export']",
+                "//bdi[normalize-space()='Export to Spreadsheet']/ancestor::button[1]",
+                "//bdi[normalize-space()='Export']/ancestor::button[1]",
+            ):
+                try:
+                    itm = WebDriverWait(self.driver, 2).until(
+                        EC.element_to_be_clickable((By.XPATH, xp))
+                    )
+                    try:
+                        itm.click()
+                        how = "native"
+                    except Exception:
+                        self.js_click(itm)
+                        how = "js"
+                    log.info("export: clicked menu item via xpath=%s (%s)", xp, how)
+                    wait_ui5_idle(self.driver, timeout=6)
+                    return
+                except Exception:
+                    continue
+        except Exception as e:
+            log.debug("export: _maybe_click_menu_item failed: %s: %s", type(e).__name__, e)
+
+    # -------------------- FS helpers --------------------
+
+    def _purge_partial_downloads(self, folder: Path) -> None:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        n = 0
+        for p in list(folder.glob("*.crdownload")):
+            try:
+                p.unlink()
+                n += 1
+            except Exception:
+                pass
+        if n:
+            log.debug("export: purged %d stale .crdownload file(s) from %s", n, folder)
+
+    def _purge_old_xlsx(self, folder: Path) -> None:
+        n = 0
+        for p in list(folder.glob("*.xlsx")):
+            try:
+                p.unlink()
+                n += 1
+            except Exception:
+                pass
+        if n:
+            log.debug("export: purged %d pre-existing .xlsx in %s", n, folder)
+
+    def _collect_known(self, folder: Path) -> Dict[str, float]:
+        known: Dict[str, float] = {}
+        for existing in folder.glob("*.xlsx"):
+            try:
+                known[str(existing.resolve())] = existing.stat().st_mtime
+            except Exception:
+                continue
+        log.debug("export: known .xlsx before click: %d", len(known))
+        return known
+
+    # -------------------- Wait logic --------------------
+
+    def _wait_xlsx(
+        self,
+        download_dir: Path,
+        timeout: int = 120,
+        known: Dict[str, float] | None = None,
+        min_mtime: float | None = None,
+        stable_checks: int = 3,
+        poll: float = 0.30,
+    ) -> Tuple[Optional[Path], int]:
+        """
+        Waits for a *new* .xlsx file. We accept a candidate if:
+          - it's not in `known`, OR
+          - its mtime >= min_mtime, OR
+          - its ctime >= min_mtime   <-- important for servers setting old Last-Modified
+        And we still require: no .crdownload sibling, size > 0, and size stable for a few polls.
+        """
+        end = time.time() + max(1, timeout)
+        known = known or {}
+
+        last_size = -1
+        stable = 0
+        last_path: Optional[Path] = None
+
+        log.info("export: waiting for .xlsx in %s (timeout=%ss, min_mtime=%s)", download_dir, timeout, min_mtime)
+
+        while time.time() < end:
+            newest: tuple[float, Path] | None = None
+
+            for cand in download_dir.glob("*.xlsx"):
+                try:
+                    st = cand.stat()
+                    resolved = str(cand.resolve())
+                    mtime = st.st_mtime
+                    ctime = getattr(st, "st_ctime", mtime)  # Windows has true ctime; POSIX shows inode change time
+                except Exception:
+                    continue
+
+                if cand.with_suffix(cand.suffix + ".crdownload").exists():
+                    log.debug("export: skip %s (still .crdownload present)", cand.name)
+                    continue
+
+                # decide if this is "new enough"
+                in_known = resolved in known and mtime <= known[resolved]
+                m_ok = (min_mtime is None) or (mtime >= min_mtime)
+                c_ok = (min_mtime is None) or (ctime >= min_mtime)
+
+                if in_known and not (m_ok or c_ok):
+                    # Old file we already had and neither mtime nor ctime moved past start — skip
+                    log.debug("export: skip older file %s (mtime<min_mtime AND ctime<min_mtime)", cand.name)
+                    continue
+
+                # candidate is acceptable; pick the most recent by max(mtime, ctime)
+                freshness = max(mtime, ctime)
+                if (newest is None) or (freshness > newest[0]):
+                    newest = (freshness, cand)
+
+            if newest:
+                cand = newest[1]
+                try:
+                    size = cand.stat().st_size
+                except Exception:
+                    size = 0
+
+                log.debug("export: candidate %s size=%s stable=%s/%s", cand.name, size, stable, stable_checks)
+
+                if size > 0:
+                    if last_path is not None and cand == last_path and size == last_size:
+                        stable += 1
+                    else:
+                        stable = 0
+                        last_path = cand
+                        last_size = size
+
+                    if stable >= stable_checks:
+                        log.info("export: using %s (size=%d)", cand, size)
+                        return cand, size
+
+            time.sleep(poll)
+
+        log.warning("export: no fresh .xlsx detected within timeout")
+        return None, 0
+
+    def export_now(
+        self,
+        download_dir: Path,
+        timeout: int = 90,
+        purge_old_xlsx: bool = False,  # set True if the filename is always the same like "Exchange Rates.xlsx"
+    ) -> Tuple[Optional[Path], int]:
+        dl_dir = Path(download_dir).expanduser().resolve()
+        dl_dir.mkdir(parents=True, exist_ok=True)
+        log.info("export: begin (download_dir=%s, purge_old=%s)", dl_dir, purge_old_xlsx)
+
+        known = self._collect_known(dl_dir)
+        self._purge_partial_downloads(dl_dir)
+
+        # Optional: remove pre-existing .xlsx so the next file cannot be “old” by definition
+        if purge_old_xlsx:
+            self._purge_old_xlsx(dl_dir)
+            known = {}  # nothing is known anymore
+
+        start_mtime = time.time()
+
+        if not self._click_export_button(timeout=min(timeout, 20)):
+            log.error("export: failed to click Export button")
+            return None, 0
+
+        self._maybe_click_menu_item()
+
+        path, size = self._wait_xlsx(
+            dl_dir,
+            timeout=timeout,
+            known=known,
+            min_mtime=start_mtime,
+            stable_checks=3,
+            poll=0.30,
+        )
+        log.info("export: done (path=%s, size=%s)", path, size)
+        return path, size
+
+
+# CurrencyExchangeRates\elements\ExcelExport\selectors.py
+
+# pages/CurrencyExchangeRates/elements/ExcelExport/selectors.py
+
+# The <span> id suffix you showed — we click the owning button of that icon
+EXPORT_SPLIT_BTN_IMG_ID_SUFFIX = "--listReport-btnExcelExport-internalSplitBtn-textButton-img"
+
+# Generic fallback for the Export button
+EXPORT_BTN_GENERIC_XP = (
+    "//button[.//bdi[normalize-space()='Export to Spreadsheet'] or .//bdi[normalize-space()='Export']]"
+)
+
+
+# CurrencyExchangeRates\elements\ExcelExport\__init__.py
+
+from .element import ExcelExporter
+__all__ = ["ExcelExporter"]
+
+
+# CurrencyExchangeRates\elements\Factors\element.py
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import StaleElementReferenceException
+import time
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+from .selectors import FROM_FACTOR_BY_LABEL_XPATH, TO_FACTOR_BY_LABEL_XPATH
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+class Factors(Element):
+    def _try_set_by_label(self, label_xpath: str, value: str = "1") -> bool:
+        def _find():
+            return self.driver.find_element(By.XPATH, label_xpath)
+
+        try:
+            inp = _retry_stale(_find)
+        except Exception:
+            return False
+
+        try:
+            for fn in (
+                lambda: inp.clear(),
+                lambda: inp.send_keys(Keys.CONTROL, "a"),
+                lambda: inp.send_keys(Keys.DELETE),
+                lambda: self.driver.execute_script(
+                    "arguments[0].value='';"
+                    "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                    "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", inp),
+            ):
+                try:
+                    _retry_stale(fn)
+                except Exception:
+                    pass
+
+            _retry_stale(lambda: inp.send_keys(value))
+            try: _retry_stale(lambda: inp.send_keys(Keys.TAB))
+            except Exception: pass
+            wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+            return True
+        except Exception:
+            return False
+
+    def try_set_from(self, value: str = "1") -> bool:
+        return self._try_set_by_label(FROM_FACTOR_BY_LABEL_XPATH, value)
+
+    def try_set_to(self, value: str = "1") -> bool:
+        return self._try_set_by_label(TO_FACTOR_BY_LABEL_XPATH, value)
+
+
+# CurrencyExchangeRates\elements\Factors\selectors.py
+
+FROM_FACTOR_BY_LABEL_XPATH = (
+    "("
+    "//label[.//bdi[normalize-space()='From Currency Unit']]/following::input[contains(@id,'-inner')][1] | "
+    "//label[.//bdi[contains(normalize-space(.),'From') and contains(normalize-space(.),'Unit')]]"
+    "/following::input[contains(@id,'-inner')][1] | "
+    "//label[.//bdi[contains(normalize-space(.),'From') and contains(normalize-space(.),'Factor')]]"
+    "/following::input[contains(@id,'-inner')][1]"
+    ")"
+)
+TO_FACTOR_BY_LABEL_XPATH = (
+    "("
+    "//label[.//bdi[normalize-space()='To Currency Unit']]/following::input[contains(@id,'-inner')][1] | "
+    "//label[.//bdi[contains(normalize-space(.),'To') and contains(normalize-space(.),'Unit')]]"
+    "/following::input[contains(@id,'-inner')][1] | "
+    "//label[.//bdi[contains(normalize-space(.),'To') and contains(normalize-space(.),'Factor')]]"
+    "/following::input[contains(@id,'-inner')][1]"
+    ")"
+)
+
+
+# CurrencyExchangeRates\elements\Factors\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\Fields\element.py
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import StaleElementReferenceException
+import time
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+from .selectors import (
+    EXCH_TYPE_INPUT_XPATH,
+    FROM_CCY_INPUT_XPATH,
+    TO_CCY_INPUT_XPATH,
+    VALID_FROM_INPUT_XPATH,
+)
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+class Fields(Element):
+    EXCH_TYPE_INPUT_XPATH = ("//input[contains(@id,'ExchangeRateTypeForEdit::Field-input-inner')]")
+    FROM_CCY_INPUT_XPATH  = ("//input[contains(@id,'SourceCurrencyForEdit::Field-input-inner')]")
+    TO_CCY_INPUT_XPATH    = ("//input[contains(@id,'TargetCurrencyForEdit::Field-input-inner')]")
+    VALID_FROM_INPUT_XPATH= ("//input[contains(@id,'ExchangeRateEffectiveDateFoEd::Field-datePicker-inner')]")
+
+    def _hard_clear(self, web_el):
+        for fn in (
+            lambda: web_el.clear(),
+            lambda: web_el.send_keys(Keys.CONTROL, "a"),
+            lambda: web_el.send_keys(Keys.DELETE),
+            lambda: self.driver.execute_script(
+                "arguments[0].value='';"
+                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", web_el),
+        ):
+            try: _retry_stale(fn)
+            except Exception: pass
+
+    def get_input_value(self, xpath: str) -> str:
+        def _get():
+            el = self.find(By.XPATH, xpath)
+            return el.get_attribute("value") or ""
+        try:
+            return _retry_stale(_get)
+        except Exception:
+            return ""
+
+    def set_plain_input(self, xpath: str, text: str, press_enter: bool = False) -> None:
+        def _get():
+            return self.wait_clickable(By.XPATH, xpath)
+        inp = _retry_stale(_get)
+
+        def _focus_click():
+            try:
+                self.js_click(inp)
+            except Exception:
+                inp.click()
+        _retry_stale(_focus_click)
+
+        _retry_stale(lambda: inp.clear())
+        _retry_stale(lambda: inp.send_keys(str(text or "")))
+        if press_enter:
+            _retry_stale(lambda: inp.send_keys(Keys.ENTER))
+        try:
+            self.driver.execute_script(
+                "arguments[0].dispatchEvent(new Event('change',{bubbles:true})); arguments[0].blur && arguments[0].blur();",
+                inp
+            )
+        except Exception:
+            pass
+        # tiny settle helps UI5 bindings stabilize before subsequent reads
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 3))
+
+
+# CurrencyExchangeRates\elements\Fields\selectors.py
+
+EXCH_TYPE_INPUT_XPATH = (
+    "//input[substring(@id,string-length(@id)-string-length('ExchangeRateTypeForEdit::Field-input-inner')+1)="
+    "'ExchangeRateTypeForEdit::Field-input-inner']"
+)
+FROM_CCY_INPUT_XPATH = (
+    "//input[substring(@id,string-length(@id)-string-length('SourceCurrencyForEdit::Field-input-inner')+1)="
+    "'SourceCurrencyForEdit::Field-input-inner']"
+)
+TO_CCY_INPUT_XPATH = (
+    "//input[substring(@id,string-length(@id)-string-length('TargetCurrencyForEdit::Field-input-inner')+1)="
+    "'TargetCurrencyForEdit::Field-input-inner']"
+)
+VALID_FROM_INPUT_XPATH = (
+    "//input[substring(@id,string-length(@id)-string-length('ExchangeRateEffectiveDateFoEd::Field-datePicker-inner')+1)="
+    "'ExchangeRateEffectiveDateFoEd::Field-datePicker-inner']"
+)
+
+
+# CurrencyExchangeRates\elements\Fields\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\Footer\element.py
+
+# elements/Footer/element.py
+import time
+from typing import Callable, Dict
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException, StaleElementReferenceException
+
+from core.base import Element, fluent_wait
+from services.ui import wait_ui5_idle
+from ..Dialog.element import DialogWatcher
+from ..Toast.element import ToastReader
+from ..Messages.element import Ui5Messages
+from ..Status.element import StatusProbe
+from .selectors import (
+    ACTIVATE_CREATE_BTN_XPATH,
+    FORM_CREATE_OR_SAVE_BTN_XPATH,
+    ACTIVATE_CREATE_BTN_CSS,
+    HEADER_TITLE_ID_SUFFIX,
+    EDIT_BTN_ID_SUFFIX,
+    DISCARD_BTN_ID_SUFFIX,
+    COPY_BTN_ID_CONTAINS,
+    MESSAGE_BTN_SUFFIX,
+    MSG_POPOVER_CLOSE_BTN_XP,
+    MSG_ITEMS_XP, 
+)
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+
+class FooterActions(Element):
+    """
+    Submit logic with:
+      - first attempt click
+      - loop clicking with DOM/MessageManager checks
+      - uses StatusProbe for robust success detection
+    """
+
+    EXTRA_SETTLE_SEC = 0.2  # trimmed
+    def open_and_read_messages(self, timeout: int = 8) -> list[str]:
+        """
+        Clicks the footer 'Messages' button to open the Message Popover (if badge > 0),
+        returns a list of visible message titles (strings). Leaves the popover open.
+        """
+        # Find the footer messages button
+        try:
+            msg_btn_id = self._query_visible_by_suffix(MESSAGE_BTN_SUFFIX)
+        except Exception:
+            msg_btn_id = None
+
+        if not msg_btn_id:
+            return []
+
+        # Read the badge text quickly (optional; if not found, still click)
+        badge_text = ""
+        try:
+            badge_bdi = self.driver.find_element(By.ID, f"{msg_btn_id}-BDI-content")
+            badge_text = (badge_bdi.text or "").strip()
+        except Exception:
+            pass
+
+        # If nothing to show (badge empty/0), bail early
+        if badge_text and badge_text.isdigit() and int(badge_text) == 0:
+            return []
+
+        # Open the popover (toggle)
+        try:
+            btn = WebDriverWait(self.driver, 3, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.ID, msg_btn_id))
+            )
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+            except Exception:
+                pass
+            try:
+                btn.click()
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", btn)
+                except Exception:
+                    pass
+        except Exception:
+            return []
+
+        # Wait for message items to render
+        try:
+            WebDriverWait(self.driver, timeout, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.presence_of_element_located((By.XPATH, MSG_ITEMS_XP))
+            )
+        except TimeoutException:
+            return []
+
+        # Collect item titles
+        texts = []
+        try:
+            items = self.driver.find_elements(By.XPATH, MSG_ITEMS_XP)
+            for it in items:
+                try:
+                    txt = (it.text or "").strip()
+                    if txt:
+                        texts.append(txt)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return texts
+
+
+    # ---------- finding & UI5 press helpers ----------
+    def _query_visible_by_suffix(self, suffix: str) -> str | None:
+        try:
+            return self.driver.execute_script(
+                """
+                var suffix = arguments[0];
+                var nodes = document.querySelectorAll("[id$='"+suffix.replace(/([.*+?^${}()|[\\]\\\\])/g,'\\\\$1')+"']");
+                function vis(el){ if(!el) return false; var cs=getComputedStyle(el);
+                  if(cs.display==='none'||cs.visibility==='hidden') return false;
+                  var r=el.getBoundingClientRect(); return (r.width>0 && r.height>0); }
+                for (var i=nodes.length-1;i>=0;i--){ if (vis(nodes[i])) return nodes[i].id||null; }
+                return null;
+                """,
+                suffix,
+            )
+        except Exception:
+            return None
+
+    def _header_aria_label(self) -> str:
+        try:
+            return self.driver.execute_script(
+                """
+                var suf = arguments[0];
+                var nodes = document.querySelectorAll("[id$='"+suf.replace(/([.*+?^${}()|[\\]\\\\])/g,'\\\\$1')+"']");
+                function vis(el){ if(!el) return false; var cs=getComputedStyle(el);
+                  if(cs.display==='none'||cs.visibility==='hidden') return false;
+                  var r=el.getBoundingClientRect(); return (r.width>0 && r.height>0); }
+                for (var i=nodes.length-1;i>=0;i--){ var el=nodes[i]; if(!vis(el)) continue;
+                  var a=(el.getAttribute('aria-label')||'').trim(); if(a) return a; }
+                return '';
+                """,
+                HEADER_TITLE_ID_SUFFIX,
+            ) or ""
+        except Exception:
+            return ""
+
+    def _query_activate_id(self) -> str | None:
+        try:
+            return self.driver.execute_script(
+                """
+                var sel = arguments[0], nodes = document.querySelectorAll(sel);
+                function vis(el){ if(!el) return false; var cs=getComputedStyle(el);
+                  if(cs.display==='none'||cs.visibility==='hidden') return false;
+                  var r=el.getBoundingClientRect(); return (r.width>0 && r.height>0); }
+                for (var i=nodes.length-1;i>=0;i--){ if (vis(nodes[i])) return nodes[i].id||null; }
+                return null;
+                """,
+                ACTIVATE_CREATE_BTN_CSS,
+            )
+        except Exception:
+            return None
+
+    def _really_clickable(self, dom_id: str) -> bool:
+        try:
+            return bool(self.driver.execute_script(
+                """
+                try {
+                  var el=document.getElementById(arguments[0]); if(!el) return false;
+                  var cs=getComputedStyle(el);
+                  if(cs.display==='none'||cs.visibility==='hidden') return false;
+                  if(el.disabled) return false;
+                  if((' '+el.className+' ').indexOf(' sapMBtnDisabled ')>=0) return false;
+                  var r=el.getBoundingClientRect();
+                  if (r.width<=0 || r.height<=0) return false;
+                  var cx=r.left+r.width/2, cy=r.top+r.height/2;
+                  var at=document.elementFromPoint(Math.max(0,cx),Math.max(0,cy));
+                  return !!(at && (at===el || el.contains(at)));
+                }catch(e){ return false; }
+                """,
+                dom_id
+            ))
+        except Exception:
+            return False
+
+    def _ui5_press_by_id(self, dom_id: str) -> str:
+        try:
+            res = self.driver.execute_script(
+                """
+                try {
+                  var id = arguments[0];
+                  var ctrl = sap && sap.ui && sap.ui.getCore ? sap.ui.getCore().byId(id) : null;
+                  if (ctrl && ctrl.firePress) { ctrl.firePress(); return 'ui5-firePress'; }
+                  if (ctrl && ctrl.press)     { ctrl.press();     return 'ui5-press'; }
+                  var el = document.getElementById(id);
+                  if (el) { el.click(); return 'dom-click-fallback'; }
+                  return 'ui5-miss';
+                } catch(e){ return 'ui5-exc:'+String(e); }
+                """,
+                dom_id,
+            )
+            return str(res)
+        except Exception as e:
+            return f"ui5-exc:{type(e).__name__}"
+
+    def _press_activate_best_effort(self) -> bool:
+        act_id = self._query_activate_id()
+        if act_id:
+            try:
+                def _get_el():
+                    return self.driver.find_element(By.ID, act_id)
+                el = _retry_stale(_get_el)
+
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                except Exception:
+                    pass
+
+                if self._really_clickable(act_id):
+                    try:
+                        _retry_stale(lambda: el.click())
+                        wait_ui5_idle(self.driver, timeout=min(4, self._timeout))
+                        time.sleep(self.EXTRA_SETTLE_SEC)
+                        return True
+                    except Exception:
+                        pass
+
+                try:
+                    self.driver.execute_script("arguments[0].click();", el)
+                    wait_ui5_idle(self.driver, timeout=min(4, self._timeout))
+                    time.sleep(self.EXTRA_SETTLE_SEC)
+                    return True
+                except Exception:
+                    pass
+
+                _ = self._ui5_press_by_id(act_id)
+                wait_ui5_idle(self.driver, timeout=min(4, self._timeout))
+                time.sleep(self.EXTRA_SETTLE_SEC)
+                return True
+            except Exception:
+                pass
+
+        # Fallback: generic Create/Save by text
+        try:
+            btn = fluent_wait(self.driver, 1.5, poll=0.15).until(
+                EC.element_to_be_clickable((By.XPATH, FORM_CREATE_OR_SAVE_BTN_XPATH))
+            )
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+            except Exception:
+                pass
+            try:
+                _retry_stale(lambda: btn.click())
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", btn)
+                except Exception:
+                    pass
+            wait_ui5_idle(self.driver, timeout=min(4, self._timeout))
+            time.sleep(self.EXTRA_SETTLE_SEC)
+            return True
+        except Exception:
+            pass
+
+        # Final fallback: Ctrl+S
+        try:
+            ActionChains(self.driver).key_down(Keys.CONTROL).send_keys("s").key_up(Keys.CONTROL).perform()
+            wait_ui5_idle(self.driver, timeout=min(4, self._timeout))
+            time.sleep(self.EXTRA_SETTLE_SEC)
+            return True
+        except Exception:
+            return False
+
+    # Kept for backward compatibility as a last-resort fallback
+    def _activated_dom(self) -> bool:
+        try:
+            has_edit    = bool(self._query_visible_by_suffix(EDIT_BTN_ID_SUFFIX))
+            has_discard = bool(self._query_visible_by_suffix(DISCARD_BTN_ID_SUFFIX))
+            aria        = (self._header_aria_label() or "")
+            if has_edit and not has_discard:
+                return True
+            if aria and ("Header area" in aria) and ("New" not in aria):
+                return True
+            return False
+        except Exception:
+            return False
+
+    def click_create(self, clicks: int = 1) -> dict:
+        info = {"clicks": 0, "dialogs": [], "toasts": []}
+        dlg = DialogWatcher(self.driver)
+        reader = ToastReader(self.driver)
+
+        for _ in range(max(1, clicks)):
+            if dlg.is_open():
+                info["dialogs"].append(dlg.text() or "")
+                break
+
+            pressed = self._press_activate_best_effort()
+            if not pressed:
+                continue
+
+            info["clicks"] += 1
+            wait_ui5_idle(self.driver, timeout=min(6, self._timeout))
+            time.sleep(self.EXTRA_SETTLE_SEC)
+
+            try:
+                t = reader.read_last()
+                if t:
+                    info["toasts"].append(t)
+            except Exception:
+                pass
+
+            if dlg.is_open():
+                info["dialogs"].append(dlg.text() or "")
+                break
+
+        return info
+
+    def close_message_popover_if_open(self, timeout: int = 3) -> bool:
+        """
+        Closes the Message Popover if it is open. Returns True if we believe it closed.
+        """
+        # Prefer the close button in the popover header
+        try:
+            close_btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.XPATH, MSG_POPOVER_CLOSE_BTN_XP))
+            )
+            try:
+                close_btn.click()
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", close_btn)
+                except Exception:
+                    pass
+            # Wait until close button disappears
+            WebDriverWait(self.driver, timeout, ignored_exceptions=(StaleElementReferenceException,)).until_not(
+                EC.presence_of_element_located((By.XPATH, MSG_POPOVER_CLOSE_BTN_XP))
+            )
+            return True
+        except Exception:
+            # Fallback: toggle the Messages button to close
+            try:
+                msg_btn_id = self._query_visible_by_suffix(MESSAGE_BTN_SUFFIX)
+                if msg_btn_id:
+                    btn = self.driver.find_element(By.ID, msg_btn_id)
+                    try:
+                        btn.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", btn)
+                    return True
+            except Exception:
+                pass
+            return False
+
+    def discard_draft(self, timeout: int = 10) -> bool:
+        """
+        Clicks footer 'Discard Draft', then confirms 'Discard' in the confirmation popover.
+        Returns True if confirmation popover disappears.
+        """
+        import time
+
+        # 1) Click footer 'Discard Draft'
+        disc_id = None
+        try:
+            disc_id = self._query_visible_by_suffix("--discard")
+        except Exception:
+            pass
+
+        if disc_id:
+            try:
+                el = WebDriverWait(self.driver, 2, ignored_exceptions=(StaleElementReferenceException,)).until(
+                    EC.element_to_be_clickable((By.ID, disc_id))
+                )
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                except Exception:
+                    pass
+                try:
+                    el.click()
+                except Exception:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", el)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # UI5 press fallback
+            _ = self._ui5_press_by_id(disc_id)
+
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+        time.sleep(self.EXTRA_SETTLE_SEC)
+
+        # 2) Confirm 'Discard' in popover
+        CONFIRM_SUFFIX = "--DiscardDraftConfirmButton"
+
+        def _click_confirm() -> bool:
+            # by ID suffix
+            try:
+                cid = self._query_visible_by_suffix(CONFIRM_SUFFIX)
+            except Exception:
+                cid = None
+
+            if cid:
+                try:
+                    btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                        EC.element_to_be_clickable((By.ID, cid))
+                    )
+                    try:
+                        self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                    except Exception:
+                        pass
+                    try:
+                        btn.click()
+                    except Exception:
+                        try:
+                            self.driver.execute_script("arguments[0].click();", btn)
+                        except Exception:
+                            pass
+                    return True
+                except Exception:
+                    pass
+
+            # by visible text
+            try:
+                xp = ("//bdi[normalize-space()='Discard']/ancestor::button[1]"
+                    " | //button[.//bdi[normalize-space()='Discard']]")
+                btn = WebDriverWait(self.driver, 1.5, ignored_exceptions=(StaleElementReferenceException,)).until(
+                    EC.element_to_be_clickable((By.XPATH, xp))
+                )
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                except Exception:
+                    pass
+                try:
+                    btn.click()
+                except Exception:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", btn)
+                    except Exception:
+                        pass
+                return True
+            except Exception:
+                return False
+
+        clicked = _click_confirm()
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+        time.sleep(self.EXTRA_SETTLE_SEC)
+
+        # If confirm button no longer visible, assume success
+        try:
+            still = self._query_visible_by_suffix(CONFIRM_SUFFIX)
+        except Exception:
+            still = None
+        return bool(clicked and not still)
+
+    def ensure_created_by_loop_clicking(
+        self,
+        object_header_ready: Callable[[], bool],
+        at_list: Callable[[], bool],
+        close_side: Callable[[], bool],
+        max_clicks: int = 5,       # was 10
+        total_timeout: int = 35,   # default; caller may override
+    ) -> Dict:
+        dlg   = DialogWatcher(self.driver)
+        reader= ToastReader(self.driver)
+        msgs  = Ui5Messages(self.driver)
+        probe = StatusProbe(self.driver)
+
+        end = time.time() + max(total_timeout, self._timeout)
+        clicks = 0
+        toasts = []
+        msgs.clear()
+
+        while clicks < max(max_clicks,1) and time.time() < end:
+            if dlg.is_open():
+                return {
+                    "status": "dialog_open",
+                    "dialog_open": True,
+                    "dialog_text": dlg.text(),
+                    "footer_clicks": clicks,
+                    "intermediate_toasts": toasts,
+                    "messages": msgs.read_all(),
+                    "popover_text": msgs.popover_text(),
+                }
+
+            if msgs.has_errors():
+                return {
+                    "status": "activation_error",
+                    "dialog_open": False,
+                    "dialog_text": "",
+                    "footer_clicks": clicks,
+                    "intermediate_toasts": toasts,
+                    "messages": msgs.errors(),
+                    "popover_text": msgs.popover_text(),
+                }
+
+            if (
+                probe.success()
+                or probe.is_persisted_object_page()
+                or object_header_ready()
+                or at_list()
+                or self._activated_dom()
+            ):
+                close_side()
+                return {
+                    "status": "created",
+                    "dialog_open": False,
+                    "dialog_text": "",
+                    "footer_clicks": clicks,
+                    "intermediate_toasts": toasts,
+                    "messages": msgs.read_all(),
+                    "popover_text": msgs.popover_text(),
+                }
+
+            if self._press_activate_best_effort():
+                clicks += 1
+                wait_ui5_idle(self.driver, timeout=min(6, self._timeout))
+                time.sleep(self.EXTRA_SETTLE_SEC)
+
+            try:
+                t = reader.read_last()
+                if t:
+                    toasts.append(t)
+                    lt = (t or "").lower()
+                    if any(k in lt for k in ("created", "saved", "activated", "has been created", "successfully")):
+                        if not (probe.success() or probe.is_persisted_object_page()):
+                            wait_ui5_idle(self.driver, timeout=min(2, self._timeout))
+                        close_side()
+                        return {
+                            "status": "created",
+                            "dialog_open": False,
+                            "dialog_text": "",
+                            "footer_clicks": clicks,
+                            "intermediate_toasts": toasts,
+                            "messages": msgs.read_all(),
+                            "popover_text": msgs.popover_text(),
+                        }
+            except Exception:
+                pass
+
+            time.sleep(0.2)
+
+        if not at_list():
+            close_side()
+
+        created = (
+            probe.success()
+            or probe.is_persisted_object_page()
+            or at_list()
+            or object_header_ready()
+            or self._activated_dom()
+        )
+        return {
+            "status": "created" if created else "unknown",
+            "footer_clicks": clicks,
+            "intermediate_toasts": toasts,
+            "dialog_open": False if not dlg.is_open() else True,
+            "dialog_text": dlg.text() if dlg.is_open() else "",
+            "messages": msgs.read_all(),
+            "popover_text": msgs.popover_text(),
+        }
+
+
+# CurrencyExchangeRates\elements\Footer\selectors.py
+
+# Prefer the specific Activate/Create button on the Object Page footer
+ACTIVATE_CREATE_BTN_XPATH = (
+    "//*[self::button or self::a]"
+    "[substring(@id,string-length(@id)-string-length('--activate')+1)='--activate']"
+)
+
+# Backup: Create/Save button by text (kept for safety)
+FORM_CREATE_OR_SAVE_BTN_XPATH = (
+    "("
+    "//bdi[normalize-space()='Create']/ancestor::button[1] | "
+    "//bdi[normalize-space()='Save']/ancestor::button[1]"
+    ")[1]"
+)
+
+# CSS variants (used by JS helpers)
+ACTIVATE_CREATE_BTN_CSS = "button[id$='--activate'],a[id$='--activate']"
+
+# DOM success signals (from your snippet)
+HEADER_TITLE_ID_SUFFIX = "--objectPage-headerTitle"   # aria-label like "* Header area"
+EDIT_BTN_ID_SUFFIX     = "--edit"
+DELETE_BTN_ID_SUFFIX   = "--delete"
+DISCARD_BTN_ID_SUFFIX  = "--discard"
+COPY_BTN_ID_CONTAINS   = "::Copy"
+
+MESSAGE_BTN_SUFFIX = "--showMessages"
+MSG_POPOVER_CLOSE_BTN_XP = "//button[contains(@class,'sapMMsgPopoverCloseBtn')]"
+MSG_ITEMS_XP = "//li[contains(@class,'sapMMsgViewItem')]//span[contains(@id,'-titleText')]"
+
+
+# CurrencyExchangeRates\elements\Footer\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\Header\element.py
+
+import time
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+from core.base import Element
+from .selectors import OBJECT_HEADER_CONTENT_XPATH, OBJECT_HEADER_RATE_VALUE_XPATH
+
+class ObjectHeaderVerifier(Element):
+    def wait_ready(self, timeout: int) -> bool:
+        t0 = time.time()
+        try:
+            WebDriverWait(self.driver, min(6, timeout), ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.presence_of_element_located((By.XPATH, OBJECT_HEADER_CONTENT_XPATH))
+            )
+        except TimeoutException:
+            return False
+        while time.time() - t0 < min(timeout, 10):
+            try:
+                span = self.driver.find_element(By.XPATH, OBJECT_HEADER_RATE_VALUE_XPATH)
+                txt = ""
+                try:
+                    txt = (span.text or "").strip()
+                except StaleElementReferenceException:
+                    continue
+                if txt:
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.15)
+        return False
+
+
+# CurrencyExchangeRates\elements\Header\selectors.py
+
+OBJECT_HEADER_CONTENT_XPATH = (
+    "//*[substring(@id,string-length(@id)-string-length('--objectPage-OPHeaderContent')+1)="
+    "'--objectPage-OPHeaderContent']"
+)
+OBJECT_HEADER_RATE_VALUE_XPATH = (
+    "//*[substring(@id,string-length(@id)-string-length('--exchangeRate-text')+1)="
+    "'--exchangeRate-text']"
+)
+
+
+# CurrencyExchangeRates\elements\Header\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\ListToolbar\element.py
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from core.base import Element, fluent_wait
+from services.ui import wait_ui5_idle
+from .selectors import CREATE_BUTTON_XPATH
+
+class ListToolbar(Element):
+    def wait_create_clickable(self, timeout: int):
+        return fluent_wait(self.driver, timeout, poll=0.2).until(
+            EC.element_to_be_clickable((By.XPATH, CREATE_BUTTON_XPATH))
+        )
+
+    def click_create(self, timeout: int):
+        btn = self.wait_create_clickable(timeout)
+        try:
+            btn.click()
+        except Exception:
+            self.js_click(btn)
+        wait_ui5_idle(self.driver, timeout=timeout)
+
+    def is_at_list(self, quick: float = 0.8) -> bool:
+        try:
+            fluent_wait(self.driver, quick, poll=0.2).until(
+                EC.element_to_be_clickable((By.XPATH, CREATE_BUTTON_XPATH))
+            )
+            return True
+        except Exception:
+            return False
+
+
+# CurrencyExchangeRates\elements\ListToolbar\selectors.py
+
+# Create button in the list report toolbar
+CREATE_BUTTON_XPATH = "//bdi[normalize-space()='Create']/ancestor::button[1]"
+
+
+# CurrencyExchangeRates\elements\ListToolbar\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\Messages\element.py
+
+from core.base import Element
+
+class Ui5Messages(Element):
+    """
+    Reads UI5 MessageManager; surfaces backend errors (why activation fails).
+    Also knows how to read the Message Popover DOM (title/subtitle/description)
+    which is what your HTML snippet shows.
+    """
+
+    def _get_data(self):
+        try:
+            return self.driver.execute_script(
+                """
+                try{
+                  var core = sap && sap.ui && sap.ui.getCore ? sap.ui.getCore() : null;
+                  if(!core) return {ok:false, data:[]};
+                  var mm = core.getMessageManager && core.getMessageManager();
+                  if(!mm) return {ok:false, data:[]};
+                  var model = mm.getMessageModel && mm.getMessageModel();
+                  if(!model) return {ok:false, data:[]};
+                  var data = (model.getData && model.getData()) || model.oData || [];
+                  var out = [];
+                  for (var i=0;i<data.length;i++){
+                    var m=data[i]||{};
+                    out.push({
+                      type: String(m.type||''),
+                      message: String(m.message||m.text||'').trim(),
+                      description: String(m.description||'').trim(),
+                      code: String(m.code||'').trim(),
+                      target: String(m.target||'').trim(),
+                      technical: !!m.technical
+                    });
+                  }
+                  return {ok:true, data:out};
+                }catch(e){ return {ok:false, data:[], err:String(e)}; }
+                """
+            ) or {"ok": False, "data": []}
+        except Exception:
+            return {"ok": False, "data": []}
+
+    def read_all(self):
+        res = self._get_data()
+        return res.get("data", []) if isinstance(res, dict) else []
+
+    def errors(self):
+        return [m for m in self.read_all() if (m.get("type") or "").lower() in ("error","fatal","critical")]
+
+    def has_errors(self) -> bool:
+        return len(self.errors()) > 0
+
+    def clear(self) -> bool:
+        try:
+            return bool(self.driver.execute_script(
+                """
+                try{
+                  var core = sap && sap.ui && sap.ui.getCore ? sap.ui.getCore() : null;
+                  var mm = core && core.getMessageManager && core.getMessageManager();
+                  if(!mm) return false;
+                  if(mm.removeAllMessages) { mm.removeAllMessages(); return true; }
+                  return false;
+                }catch(e){ return false; }
+                """
+            ))
+        except Exception:
+            return False
+
+    # ---------- NEW: Message Popover DOM reader ----------
+
+    def popover_text(self) -> str:
+        try:
+            txt = self.driver.execute_script(
+                """
+                try{
+                  function visible(el){
+                    if(!el) return false;
+                    var cs = getComputedStyle(el);
+                    if(cs.display==='none'||cs.visibility==='hidden') return false;
+                    var r = el.getBoundingClientRect();
+                    return r.width>0 && r.height>0;
+                  }
+
+                  var wrap = document.querySelector('.sapMPopoverWrapper');
+                  if(!wrap || !visible(wrap)) return '';
+
+                  var errIcon = wrap.querySelector('.sapMMsgViewDescIconError');
+                  var errStrip = document.querySelector('.sapMMsgStrip.sapMMsgStripError');
+                  var isErr = !!(errIcon || errStrip);
+
+                  var titleEl = wrap.querySelector('.sapMMsgView .sapMMsgViewTitleText .sapMLnkText');
+                  var subEl   = wrap.querySelector('.sapMMsgView .sapMMsgViewSubtitleText');
+                  var descEl  = wrap.querySelector('.sapMMsgView .sapMMsgViewDescriptionText');
+
+                  var title = titleEl ? (titleEl.innerText||titleEl.textContent||'').trim() : '';
+                  var sub   = subEl   ? (subEl.innerText||subEl.textContent||'').trim() : '';
+                  var desc  = descEl  ? (descEl.innerText||descEl.textContent||'').trim() : '';
+
+                  if(!isErr && !title && !desc) return '';
+                  var parts = [];
+                  if(title) parts.push(title);
+                  if(sub)   parts.push(sub);
+                  if(desc)  parts.push(desc);
+                  return parts.join(' | ');
+                }catch(e){ return ''; }
+            """
+            )
+            return (txt or "").strip()
+        except Exception:
+            return ""
+
+
+# CurrencyExchangeRates\elements\Quotation\element.py
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import StaleElementReferenceException
+import time
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+from .selectors import QUOTATION_INNER_INPUT_XPATH, QUOTATION_ARROW_BTN_XPATH, QUOTATION_OPTION_BY_TEXT_XPATH
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+class QuotationField(Element):
+    def _hard_clear(self, inp):
+        for fn in (
+            lambda: inp.clear(),
+            lambda: inp.send_keys(Keys.CONTROL, "a"),
+            lambda: inp.send_keys(Keys.DELETE),
+            lambda: self.driver.execute_script(
+                "arguments[0].value='';"
+                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", inp),
+        ):
+            try: _retry_stale(fn)
+            except Exception: pass
+
+    def set_value(self, value: str):
+        wait = WebDriverWait(self.driver, max(self._timeout, 20), ignored_exceptions=(StaleElementReferenceException,))
+        inp = wait.until(EC.visibility_of_element_located((By.XPATH, QUOTATION_INNER_INPUT_XPATH)))
+
+        try: _retry_stale(lambda: inp.click())
+        except Exception: self.js_click(inp)
+
+        self._hard_clear(inp)
+
+        _retry_stale(lambda: inp.send_keys(value))
+        _retry_stale(lambda: inp.send_keys(Keys.ENTER))
+        _retry_stale(lambda: inp.send_keys(Keys.TAB))
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+
+        def _cur():
+            return (inp.get_attribute("value") or "").strip()
+        try:
+            cur = _retry_stale(_cur)
+        except Exception:
+            cur = ""
+        if cur.lower() != value.strip().lower():
+            try:
+                arrow = wait.until(EC.element_to_be_clickable((By.XPATH, QUOTATION_ARROW_BTN_XPATH)))
+                try: _retry_stale(lambda: arrow.click())
+                except Exception: self.js_click(arrow)
+            except Exception:
+                try: _retry_stale(lambda: inp.send_keys(Keys.ALT, Keys.DOWN))
+                except Exception: pass
+            wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+            opt_xpath = QUOTATION_OPTION_BY_TEXT_XPATH.format(TEXT=value.strip())
+            option = wait.until(EC.element_to_be_clickable((By.XPATH, opt_xpath)))
+            try: _retry_stale(lambda: option.click())
+            except Exception: self.js_click(option)
+            wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+
+
+# CurrencyExchangeRates\elements\Quotation\selectors.py
+
+QUOTATION_INNER_INPUT_XPATH = (
+    "//input[substring(@id,string-length(@id)-string-length('ExchangeRateQuotation::Field-comboBoxEdit-inner')+1)="
+    "'ExchangeRateQuotation::Field-comboBoxEdit-inner']"
+)
+QUOTATION_ARROW_BTN_XPATH = (
+    "//span[substring(@id,string-length(@id)-string-length('ExchangeRateQuotation::Field-comboBoxEdit-arrow')+1)="
+    "'ExchangeRateQuotation::Field-comboBoxEdit-arrow']/ancestor::button[1] | "
+    "//span[substring(@id,string-length(@id)-string-length('ExchangeRateQuotation::Field-comboBoxEdit-arrow')+1)="
+    "'ExchangeRateQuotation::Field-comboBoxEdit-arrow']"
+)
+QUOTATION_OPTION_BY_TEXT_XPATH = (
+    "//div[contains(@id,'ExchangeRateQuotation::Field-comboBoxEdit-popup')]"
+    "//bdi[normalize-space()='{TEXT}']/ancestor::li[1] | "
+    "//div[contains(@id,'ExchangeRateQuotation::Field-comboBoxEdit-popup')]"
+    "//span[normalize-space()='{TEXT}']/ancestor::li[1]"
+)
+
+
+# CurrencyExchangeRates\elements\Quotation\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\Rate\element.py
+
+from decimal import Decimal, ROUND_HALF_UP
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import StaleElementReferenceException
+import time
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+from .selectors import EXCH_RATE_INPUT_XPATH, EXCH_RATE_INPUT_FALLBACK_XPATH
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+class ExchangeRateField(Element):
+    def _ui_lang_tag(self) -> str:
+        try:
+            return self.driver.execute_script(
+                """
+                try{
+                  var c=sap && sap.ui && sap.ui.getCore && sap.ui.getCore().getConfiguration && sap.ui.getCore().getConfiguration();
+                  if(!c) return (navigator.language || 'en-US');
+                  if (c.getLanguageTag) return c.getLanguageTag();
+                  if (c.getLanguage)    return c.getLanguage();
+                  return (navigator.language || 'en-US');
+                }catch(e){ return (navigator.language || 'en-US'); }
+                """
+            ) or "en-US"
+        except Exception:
+            return "en-US"
+
+    def _format_rate_locale(self, num: Decimal) -> str:
+        q = num.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+        lang = self._ui_lang_tag()
+        try:
+            from babel.numbers import format_decimal
+            return format_decimal(q, format="0.00000", locale=(lang or "en-US").replace("-", "_"))
+        except Exception:
+            try:
+                return self.driver.execute_script(
+                    """
+                    try{
+                      var val = Number(arguments[0]);
+                      var lang = arguments[1] || (navigator.language || 'en-US');
+                      if (!isFinite(val)) return '';
+                      return new Intl.NumberFormat(lang,
+                               {minimumFractionDigits:5, maximumFractionDigits:5, useGrouping:false}
+                              ).format(val);
+                    }catch(e){ return String(arguments[0]); }
+                    """,
+                    float(q), lang
+                )
+            except Exception:
+                return f"{q:.5f}"
+
+    def _find_input(self):
+        try:
+            return WebDriverWait(self.driver, max(self._timeout, 10), ignored_exceptions=(StaleElementReferenceException,)).until(
+                lambda d: d.find_element(By.XPATH, EXCH_RATE_INPUT_XPATH)
+            )
+        except Exception:
+            pass
+        try:
+            return WebDriverWait(self.driver, max(self._timeout, 10), ignored_exceptions=(StaleElementReferenceException,)).until(
+                lambda d: d.find_element(By.XPATH, EXCH_RATE_INPUT_FALLBACK_XPATH)
+            )
+        except Exception:
+            raise RuntimeError("Exchange Rate input not found (primary nor fallback).")
+
+    def _hard_clear(self, el):
+        for js in (
+            lambda: el.clear(),
+            lambda: el.send_keys(Keys.CONTROL, "a"),
+            lambda: el.send_keys(Keys.DELETE),
+            lambda: self.driver.execute_script(
+                "arguments[0].value='';"
+                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));", el),
+        ):
+            try: _retry_stale(js)
+            except Exception: pass
+
+    def commit(self, times: int = 1):
+        inp = self._find_input()
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
+        except Exception:
+            pass
+        try:
+            _retry_stale(lambda: inp.click())
+        except Exception:
+            self.js_click(inp)
+
+        try:
+            ac = ActionChains(self.driver)
+            for _ in range(max(1, times)):
+                ac.send_keys(Keys.ENTER).pause(0.03)
+            ac.send_keys(Keys.TAB)
+            ac.perform()
+        except Exception:
+            try:
+                _retry_stale(lambda: inp.send_keys(Keys.ENTER))
+                _retry_stale(lambda: inp.send_keys(Keys.TAB))
+            except Exception: pass
+
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+
+    def set_via_typing(self, rate_val: str | float | Decimal):
+        num = Decimal(str(rate_val))
+        if num <= 0:
+            raise ValueError("rate_val must be > 0")
+        s = self._format_rate_locale(num)
+        inp = self._find_input()
+        self._hard_clear(inp)
+        _retry_stale(lambda: inp.send_keys(s))
+        try: _retry_stale(lambda: inp.send_keys(Keys.TAB))
+        except Exception: pass
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+
+    def set_via_ui5(self, rate_val: str | float | Decimal):
+        inp = self._find_input()
+        inner_id = inp.get_attribute("id")
+        if not inner_id:
+            raise RuntimeError("Exchange Rate input has no DOM id")
+
+        res = self.driver.execute_script(
+            """
+            try{
+              var innerId=arguments[0], num=Number(String(arguments[1]).replace(',','.'));
+              if(!isFinite(num) || num<=0){ return {ok:false, reason:'nonpositive'}; }
+              var ctrlId = innerId.endsWith('-inner') ? innerId.slice(0,-6) : innerId;
+              var ctrl = sap && sap.ui && sap.ui.getCore ? sap.ui.getCore().byId(ctrlId) : null;
+              var fmt = (sap && sap.ui && sap.ui.core && sap.ui.core.format && sap.ui.core.format.NumberFormat)
+                        ? sap.ui.core.format.NumberFormat.getFloatInstance({maxFractionDigits:5,minFractionDigits:5,groupingEnabled:false})
+                        : null;
+              var s = fmt ? fmt.format(num) : num.toFixed(5);
+
+              if(ctrl && ctrl.setValue){
+                  ctrl.setValue(s);
+                  if (ctrl.fireLiveChange) ctrl.fireLiveChange({ value: s });
+                  if (ctrl.fireChange)     ctrl.fireChange({ value: s });
+              }
+              var el = document.getElementById(innerId);
+              if(el){
+                  el.focus();
+                  el.value = s;
+                  el.dispatchEvent(new Event('input',{bubbles:true}));
+                  el.dispatchEvent(new Event('change',{bubbles:true}));
+              }
+              var parsed = fmt ? fmt.parse(s) : Number(s.replace(',','.'));
+              return {ok:(typeof parsed==='number' && parsed>0), shown:s, parsed:parsed};
+            }catch(e){ return {ok:false, reason:String(e)}; }
+            """,
+            inner_id, str(rate_val)
+        )
+        wait_ui5_idle(self.driver, timeout=min(self._timeout, 4))
+        if not res or not res.get("ok"):
+            raise RuntimeError(f"Could not set Exchange Rate via UI5. Result={res}.")
+
+
+# CurrencyExchangeRates\elements\Rate\selectors.py
+
+EXCH_RATE_INPUT_XPATH = (
+    "//input[substring(@id,string-length(@id)-string-length('AbsoluteExchangeRate::Field-input-inner')+1)="
+    "'AbsoluteExchangeRate::Field-input-inner']"
+)
+
+EXCH_RATE_INPUT_FALLBACK_XPATH = (
+    "("
+    "//label[.//bdi[normalize-space()='Exchange Rate']]"
+    "/following::input[contains(@id,'-inner')][1] | "
+    "//span[normalize-space()='Exchange Rate']/ancestor::label[1]"
+    "/following::input[contains(@id,'-inner')][1] | "
+    "//*[self::label or self::span][contains(normalize-space(.), 'Exchange Rate')]"
+    "/following::input[contains(@id,'-inner')][1]"
+    ")"
+)
+
+
+# CurrencyExchangeRates\elements\Rate\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\SideColumn\element.py
+
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+import time
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+from ..ListToolbar.element import ListToolbar
+from .selectors import CLOSE_COLUMN_BTN_XPATH
+
+def _retry_stale(fn, tries=3, pause=0.12):
+    last = None
+    for _ in range(max(1, tries)):
+        try:
+            return fn()
+        except StaleElementReferenceException as e:
+            last = e
+            time.sleep(pause)
+    if last:
+        raise last
+    return None
+
+class SideColumnController(Element):
+    def close_if_present(self, timeout: int | None = None) -> bool:
+        t = timeout or max(self._timeout, 20)
+        listbar = ListToolbar(self.driver)
+
+        if listbar.is_at_list(quick=0.8):
+            return True
+
+        try:
+            btn = WebDriverWait(self.driver, min(5, t), ignored_exceptions=(StaleElementReferenceException,)).until(
+                EC.element_to_be_clickable((By.XPATH, CLOSE_COLUMN_BTN_XPATH))
+            )
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+            except Exception:
+                pass
+            try:
+                _retry_stale(lambda: btn.click())
+            except Exception:
+                self.js_click(btn)
+            wait_ui5_idle(self.driver, timeout=min(6, t))
+        except TimeoutException:
+            try:
+                did = self.driver.execute_script(
+                    """
+                    try{
+                      var q = document.querySelectorAll(
+                        "button[id$='--closeColumn'],button[id$='--closeColumnBtn'],button[id*='closeColumn']"
+                      );
+                      for (var i=q.length-1;i>=0;i--){
+                        var b=q[i];
+                        var cs=window.getComputedStyle(b);
+                        if(b && b.offsetParent && cs.visibility!=='hidden' && cs.display!=='none'){ b.click(); return 'clicked-dom'; }
+                      }
+                      return 'none';
+                    }catch(e){ return 'err:'+e; }
+                    """
+                )
+            except Exception:
+                did = "err"
+            wait_ui5_idle(self.driver, timeout=2)
+
+            if did != "clicked-dom":
+                try:
+                    _ = self.driver.execute_script(
+                        """
+                        try{
+                          var core=sap && sap.ui && sap.ui.getCore && sap.ui.getCore();
+                          if(!core) return 'no-core';
+                          var all = core && core.mElements ? Object.values(core.mElements) : [];
+                          var fcl=null, name='';
+                          for (var i=0;i<all.length;i++){
+                            var c=all[i];
+                            try{
+                              name=c.getMetadata && c.getMetadata().getName && c.getMetadata().getName();
+                              if(name==='sap.f.FlexibleColumnLayout'){ fcl=c; break; }
+                            }catch(e){}
+                          }
+                          if(fcl && fcl.setLayout){
+                            var LT = sap.f && sap.f.LayoutType;
+                            var one = (LT && LT.OneColumn) || 'OneColumn';
+                            fcl.setLayout(one);
+                            return 'set-one-column';
+                          }
+                          return 'no-fcl';
+                        }catch(e){ return 'err:'+e; }
+                        """
+                    )
+                except Exception:
+                    _ = "err"
+                wait_ui5_idle(self.driver, timeout=2)
+
+        if listbar.is_at_list(quick=1.0):
+            return True
+        return True
+
+
+# CurrencyExchangeRates\elements\SideColumn\selectors.py
+
+CLOSE_COLUMN_BTN_XPATH = (
+    "("
+    "  //button[substring(@id,string-length(@id)-string-length('--closeColumn')+1)='--closeColumn']"
+    "  | //button[substring(@id,string-length(@id)-string-length('--closeColumnBtn')+1)='--closeColumnBtn']"
+    "  | //span[substring(@id,string-length(@id)-string-length('--closeColumn-inner')+1)='--closeColumn-inner']/ancestor::button[1]"
+    "  | //span[substring(@id,string-length(@id)-string-length('--closeColumn-img')+1)='--closeColumn-img']/ancestor::button[1]"
+    "  | //button[@title='Close' or @aria-label='Close' or @aria-label='Close Column']"
+    ")[1]"
+)
+
+
+# CurrencyExchangeRates\elements\SideColumn\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\Status\element.py
+
+# elements/Status/element.py
+import time
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+
+from core.base import Element
+from .selectors import (
+    HEADER_EDIT_BTN_XPATH, HEADER_DELETE_BTN_XPATH, HEADER_COPY_BTN_XPATH,
+    FOOTER_DISCARD_DRAFT_BTN_XPATH,
+    CHANGE_LOG_SECTION_ANCHOR_XPATH, TREND_SECTION_ANCHOR_XPATH,
+    OBJECT_HEADER_CONTENT_XPATH,
+)
+
+class StatusProbe(Element):
+    def _exists(self, xp: str, t: float = 0.7) -> bool:
+        try:
+            WebDriverWait(self.driver, t).until(EC.presence_of_element_located((By.XPATH, xp)))
+            return True
+        except Exception:
+            return False
+
+    def is_active_entity(self):
+        try:
+            res = self.driver.execute_script(
+                """
+                try{
+                  var core=sap && sap.ui && sap.ui.getCore && sap.ui.getCore();
+                  if(!core) return {ok:false, why:'no-core'};
+                  var els = core && core.mElements ? Object.values(core.mElements) : [];
+                  for (var i=0;i<els.length;i++){
+                    var c=els[i];
+                    try{
+                      var n=c.getMetadata&&c.getMetadata().getName&&c.getMetadata().getName();
+                      if(n==='sap.uxap.ObjectPageLayout'){
+                        var bc=c.getBindingContext&&c.getBindingContext();
+                        if(bc){
+                          var o=bc.getObject&&bc.getObject();
+                          if(o && ('IsActiveEntity' in o)) return {ok:true, active: !!o.IsActiveEntity};
+                          var p=bc.getProperty&&bc.getProperty('IsActiveEntity');
+                          if(typeof p!=='undefined') return {ok:true, active: !!p};
+                        }
+                      }
+                    }catch(e){}
+                  }
+                  for (var j=0;j<els.length;j++){
+                    var c2=els[j];
+                    try{
+                      var bc2=c2.getBindingContext&&c2.getBindingContext();
+                      if(bc2){
+                        var p2=bc2.getProperty&&bc2.getProperty('IsActiveEntity');
+                        if(typeof p2!=='undefined') return {ok:true, active: !!p2};
+                      }
+                    }catch(e){}
+                  }
+                  return {ok:false, why:'no-binding'};
+                }catch(e){ return {ok:false, why:String(e)}; }
+                """
+            )
+            if isinstance(res, dict) and res.get("ok"):
+                return bool(res.get("active"))
+        except Exception:
+            pass
+        return None
+
+    def buttons_state(self) -> dict:
+        return {
+            "has_edit":   self._exists(HEADER_EDIT_BTN_XPATH),
+            "has_delete": self._exists(HEADER_DELETE_BTN_XPATH),
+            "has_copy":   self._exists(HEADER_COPY_BTN_XPATH),
+            "has_discard_draft": self._exists(FOOTER_DISCARD_DRAFT_BTN_XPATH),
+        }
+
+    def sections_present(self) -> dict:
+        return {
+            "has_log":   self._exists(CHANGE_LOG_SECTION_ANCHOR_XPATH),
+            "has_trend": self._exists(TREND_SECTION_ANCHOR_XPATH),
+        }
+
+    def header_aria_label(self) -> str:
+        try:
+            el = WebDriverWait(self.driver, 0.7).until(
+                EC.presence_of_element_located((By.XPATH, OBJECT_HEADER_CONTENT_XPATH))
+            )
+            return (el.get_attribute("aria-label") or "").strip()
+        except Exception:
+            return ""
+
+    def object_header_text(self) -> str:
+        try:
+            return self.driver.execute_script("""
+                try{
+                  var el = document.querySelector("[id*='ObjectPageDynamicHeaderTitle-inner']");
+                  return (el && (el.innerText||el.textContent)||'').trim();
+                }catch(e){return '';}
+            """) or ""
+        except Exception:
+            return ""
+
+    def is_create_mode(self) -> bool:
+        try:
+            return bool(self.driver.execute_script("""
+                try{
+                  function vis(el){ if(!el) return false; var cs=getComputedStyle(el);
+                    if(cs.display==='none'||cs.visibility==='hidden') return false;
+                    var r=el.getBoundingClientRect(); return r.width>0 && r.height>0;
+                  }
+                  var nodes=[...document.querySelectorAll('button,bdi')];
+                  return nodes.some(n=>{
+                    var t=(n.innerText||n.textContent||'').trim();
+                    if(!/\bCreate\b/i.test(t)) return false;
+                    var b=n.tagName==='BDI' ? n.closest('button') : n;
+                    return vis(b);
+                  });
+                }catch(e){return false;}
+            """))
+        except Exception:
+            return False
+
+    def is_draft_url(self) -> bool:
+        try:
+            return bool(self.driver.execute_script("return location.href.includes('IsActiveEntity=false');"))
+        except Exception:
+            return False
+
+    def is_persisted_object_page(self) -> bool:
+        title = self.object_header_text()
+        if not title:
+            return False
+        if self.is_create_mode():
+            return False
+        if not self.is_draft_url():
+            return True
+        btns = self.buttons_state()
+        return (btns["has_edit"] and not btns["has_discard_draft"])
+
+    def success(self) -> bool:
+        active = self.is_active_entity()
+        if active is True:
+            return True
+
+        btns = self.buttons_state()
+        if btns["has_edit"] and not btns["has_discard_draft"]:# Discard Draft disappeared
+            return True
+
+        secs = self.sections_present()
+        if secs["has_log"] or secs["has_trend"]:
+            return True
+
+        aria = self.header_aria_label()
+        if aria and "Header area" in aria and "New" not in aria:
+            return True
+
+        if self.is_persisted_object_page():
+            return True
+
+        return False
+
+
+# CurrencyExchangeRates\elements\Status\selectors.py
+
+# elements/Status/selectors.py
+
+# Action buttons that flip after activation
+HEADER_EDIT_BTN_XPATH = (
+    "//bdi[normalize-space()='Edit']/ancestor::button[1] | "
+    "//button[substring(@id,string-length(@id)-string-length('--edit')+1)='--edit']"
+)
+HEADER_DELETE_BTN_XPATH = (
+    "//bdi[normalize-space()='Delete']/ancestor::button[1] | "
+    "//button[substring(@id,string-length(@id)-string-length('--delete')+1)='--delete']"
+)
+HEADER_COPY_BTN_XPATH = (
+    "//bdi[normalize-space()='Copy']/ancestor::button[1] | "
+    "//button[substring(@id,string-length(@id)-string-length('--copy')+1)='--copy']"
+)
+FOOTER_DISCARD_DRAFT_BTN_XPATH = (
+    "//bdi[normalize-space()='Discard Draft']/ancestor::button[1] | "
+    "//button[substring(@id,string-length(@id)-string-length('--discard')+1)='--discard']"
+)
+
+# Sections that typically appear post-activation
+CHANGE_LOG_SECTION_ANCHOR_XPATH = (
+    "//a[contains(@id,'ExchangeRateLog') and contains(@id,'Section-anchor')] | "
+    "//a[contains(normalize-space(.), 'Change Log') and contains(@id,'Section-anchor')]"
+)
+TREND_SECTION_ANCHOR_XPATH = (
+    "//a[contains(@id,'CurrencyExchangeRateTrend') and contains(@id,'Section-anchor')] | "
+    "//a[contains(normalize-space(.), 'Trend') and contains(@id,'Section-anchor')]"
+)
+
+# Object header root for reading aria-label
+OBJECT_HEADER_CONTENT_XPATH = (
+    "//*[substring(@id,string-length(@id)-string-length('--objectPage-OPHeaderContent')+1)="
+    "'--objectPage-OPHeaderContent']"
+)
+
+
+# CurrencyExchangeRates\elements\Toast\element.py
+
+from core.base import Element
+from .selectors import MESSAGE_TOAST_CSS
+
+class ToastReader(Element):
+    def read_last(self) -> str:
+        try:
+            txt = self.driver.execute_script(
+                "var nodes=document.querySelectorAll(arguments[0]);"
+                "if(!nodes||nodes.length===0) return '';"
+                "var t=nodes[nodes.length-1];"
+                "return (t.innerText||t.textContent||'').trim();",
+                MESSAGE_TOAST_CSS,
+            )
+            return (txt or "").strip()
+        except Exception:
+            return ""
+
+
+# CurrencyExchangeRates\elements\Toast\selectors.py
+
+MESSAGE_TOAST_CSS = ".sapMMessageToast"
+
+
+# CurrencyExchangeRates\elements\Toast\__init__.py
+
+
+
+# CurrencyExchangeRates\elements\Validation\element.py
+
+from selenium.webdriver.common.by import By
+from core.base import Element
+from .selectors import ANY_INVALID_INPUT_XPATH, ANY_ERROR_WRAPPER_XPATH
+
+class ValidationInspector(Element):
+    def collect(self) -> str | None:
+        try:
+            bad_inputs = self.driver.find_elements(By.XPATH, ANY_INVALID_INPUT_XPATH)
+            if bad_inputs:
+                messages = []
+                for el_ in bad_inputs:
+                    try:
+                        err_id = el_.get_attribute("aria-errormessage") or ""
+                        msg = self.driver.execute_script(
+                            "var id=arguments[0];"
+                            "var n=id?document.getElementById(id):null;"
+                            "return n? (n.innerText || n.textContent || '').trim():'';", err_id)
+                        if msg: messages.append(msg)
+                    except Exception:
+                        continue
+                if messages: return "; ".join(sorted(set(messages)))
+                return f"{len(bad_inputs)} invalid field(s)."
+            wrappers = self.driver.find_elements(By.XPATH, ANY_ERROR_WRAPPER_XPATH)
+            if wrappers: return f"{len(wrappers)} field wrapper(s) in error state."
+        except Exception:
+            pass
+        return None
+
+
+# CurrencyExchangeRates\elements\Validation\selectors.py
+
+ANY_INVALID_INPUT_XPATH = "//*[(@aria-invalid='true') and (self::input or self::textarea)]"
+ANY_ERROR_WRAPPER_XPATH = "//*[contains(@class,'sapMInputBaseContentWrapperError')]"
+
+
+# CurrencyExchangeRates\elements\Validation\__init__.py
+
+
+
+# Index\ProcurementOverviewTile\element.py
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+from .selectors import GRID_READY_XPATH, BY_HREF_XPATH, BY_TITLE_TEXT_XPATH, BY_ARIA_LABEL_XPATH
+
+class ProcurementOverviewTile(Element):
+    def _find_tile_quick(self, timeout_s: float):
+        wait = WebDriverWait(self.driver, timeout_s)
+        # Ensure tiles grid exists
+        wait.until(EC.presence_of_element_located((By.XPATH, GRID_READY_XPATH)))
+
+        # Try a few reliable selectors with short caps
+        for xp in (BY_HREF_XPATH, BY_TITLE_TEXT_XPATH, BY_ARIA_LABEL_XPATH):
+            try:
+                return WebDriverWait(self.driver, timeout_s).until(
+                    EC.presence_of_element_located((By.XPATH, xp))
+                )
+            except Exception:
+                continue
+        return None
+
+    def click(self):
+        # Keep things brisk
+        short = min(self._timeout, 6)
+        wait_ui5_idle(self.driver, timeout=short)
+
+        el = self._find_tile_quick(timeout_s=short)
+        if el:
+            href = (el.get_attribute("href") or "").strip()
+            # Try normal click → JS click
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                WebDriverWait(self.driver, short).until(EC.element_to_be_clickable((By.XPATH, BY_TITLE_TEXT_XPATH)))
+                el.click()
+                wait_ui5_idle(self.driver, timeout=short)
+                return
+            except Exception:
+                try:
+                    self.driver.execute_script("arguments[0].click();", el)
+                    wait_ui5_idle(self.driver, timeout=short)
+                    return
+                except Exception:
+                    if href:
+                        self.driver.execute_script("window.location.href = arguments[0];", href)
+                        wait_ui5_idle(self.driver, timeout=self._timeout)
+                        return
+                    raise RuntimeError("Found tile but could not activate it.")
+        else:
+            # Hard fallback: navigate directly by hash (fastest)
+            self.driver.execute_script(
+                "location.href = location.origin + '/ui?sap-ushell-config=lean#Procurement-displayOverviewPage';"
+            )
+            wait_ui5_idle(self.driver, timeout=self._timeout)
+
+
+# Index\ProcurementOverviewTile\selectors.py
+
+# pages/Index/elements/ProcurementOverviewTile/selectors.py
+
+# Grid container (ensures tiles were rendered)
+GRID_READY_XPATH = ("//div[starts-with(@id,'__section') and "
+                    "contains(@id,'-defaultArea-listUl') and @role='list']")
+
+# Primary: match by the hash target in the href (most stable between tenants)
+BY_HREF_XPATH = ("//a[contains(@class,'sapMGT') and "
+                 "contains(@href, '#Procurement-displayOverviewPage')]")
+
+# Secondary: visible title text (from your HTML)
+BY_TITLE_TEXT_XPATH = ("//a[contains(@class,'sapMGT')]"
+                       "[.//span[normalize-space()='Procurement Overview']]")
+
+# Tertiary: aria-label starts with title
+BY_ARIA_LABEL_XPATH = ("//a[contains(@class,'sapMGT') and "
+                       "starts-with(normalize-space(@aria-label),'Procurement Overview')]")
+
+
+# Index\ProcurementOverviewTile\__init__.py
+
+
+
+# Index\PurchasingTab\element.py
+
+from selenium.webdriver.common.by import By
+from core.base import Element
+from services.ui import wait_ui5_idle
+from .selectors import PURCHASING_TAB_XPATH
+
+class PurchasingTab(Element):
+    def click(self):
+        wait_ui5_idle(self.driver, timeout=self._timeout)
+        el = self.wait_clickable(By.XPATH, PURCHASING_TAB_XPATH)
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+            el.click()
+        except Exception:
+            self.js_click(el)
+
+
+# Index\PurchasingTab\selectors.py
+
+# pages/Index/elements/PurchasingTab/selectors.py
+PURCHASING_TAB_XPATH = (
+    "//div[contains(@class,'sapMITBFilterWrapper')]"
+    "[.//span[normalize-space()='Purchasing']]"
+)
+
+
+# Index\PurchasingTab\__init__.py
+
+
+
+# Login\elements\__init__.py
+
+
+
+# Login\elements\Password\element.py
+
+from selenium.webdriver.common.by import By
+from core.base import Element
+from .selectors import PASSWORD_INPUT
+
+class Password(Element):
+    def set(self, value: str):
+        el = self.wait_visible(By.CSS_SELECTOR, PASSWORD_INPUT)
+        el.clear()
+        el.send_keys(value)
+
+
+# Login\elements\Password\selectors.py
+
+PASSWORD_INPUT = "#j_password"
+
+
+# Login\elements\Password\__init__.py
+
+
+
+# Login\elements\Submit\element.py
+
+from selenium.webdriver.common.by import By
+from core.base import Element
+from .selectors import SUBMIT_BTN
+
+class Submit(Element):
+    def click(self):
+        el = self.wait_clickable(By.CSS_SELECTOR, SUBMIT_BTN)
+        try:
+            el.click()
+        except Exception:
+            self.js_click(el)
+
+
+# Login\elements\Submit\selectors.py
+
+SUBMIT_BTN = "#logOnFormSubmit"
+
+
+# Login\elements\Submit\__init__.py
+
+
+
+# Login\elements\Username\element.py
+
+from selenium.webdriver.common.by import By
+from core.base import Element
+from .selectors import USERNAME_INPUT
+
+class Username(Element):
+    def set(self, value: str):
+        el = self.wait_visible(By.CSS_SELECTOR, USERNAME_INPUT)
+        el.clear()
+        el.send_keys(value)
+
+
+# Login\elements\Username\selectors.py
+
+USERNAME_INPUT = "#j_username"
+
+
+# Login\elements\Username\__init__.py
+
+
+
+# Shell\Search\element.py
+
+# pages/Shell/Search/element.py
+from __future__ import annotations
+
+from core.base import Element
+from services.ui import wait_ui5_idle
+
+# Keep selectors import for compatibility with any external references.
+from .selectors import (
+    SEARCH_TOGGLE_CSS_PRIMARY,
+    SEARCH_TOGGLE_CSS_ALT_HELP,
+    SEARCH_TOGGLE_CSS_ALT_ARIA,
+    SEARCH_INPUT_INNER_CSS,
+    SUGGEST_TABLE_XPATH,
+    APP_ROW_BY_TEXT_XPATH,
+    APP_ROW_BY_TEXT_ALT_XPATH,
+)
+
+# Intent hash for the Currency Exchange Rates app (target destination)
+APP_HASH_CURRENCY = "#Currency-maintainExchangeRates"
+
+
+class ShellSearch(Element):
+    """
+    Hard override: DO NOT TYPE IN THE FLP HEADER SEARCH.
+    Tenant/FLP is ignoring synthetic keystrokes. We deep-link by intent instead.
+
+    Any existing call sites like:
+        ShellSearch(driver).open_search().type_and_choose_app("Currency Exchange Rates")
+    will now deterministically navigate to the app hash and wait for UI5 to settle.
+    """
+
+    # --- Core navigation helpers ---
+    def open_app_by_hash(self, hash_fragment: str, settle_timeout: int = 20):
+        h = str(hash_fragment or "").strip()
+        if not h.startswith("#"):
+            raise ValueError("hash_fragment must start with '#' (e.g. #Currency-maintainExchangeRates)")
+        self.driver.execute_script(
+            "location.href = location.origin + '/ui?sap-ushell-config=lean' + arguments[0];",
+            h
+        )
+        wait_ui5_idle(self.driver, timeout=max(self._timeout, settle_timeout))
+        return self
+
+    def open_currency_app_fast(self, settle_timeout: int | None = None):
+        """Go straight to Currency Exchange Rates without touching the search UI."""
+        return self.open_app_by_hash(APP_HASH_CURRENCY, settle_timeout or 20)
+
+    # --- OVERRIDES: keep legacy API, force deterministic behavior ---
+    def open_search(self):
+        """
+        No-op to preserve fluent chains.
+        Example: ShellSearch(driver).open_search().type_and_choose_app("...")
+        """
+        return self
+
+    def type_and_choose_app(self, query_text: str, exact_click_text: str = "Currency Exchange Rates"):
+        """
+        Legacy signature retained. Ignores the header search completely and deep-links to the app.
+        """
+        return self.open_currency_app_fast()
+
+
+# Shell\Search\selectors.py
+
+# pages/Shell/Search/selectors.py
+
+# Shell search toggle (try a few stable variants)
+SEARCH_TOGGLE_CSS_PRIMARY = "a#sf.sapUshellShellHeadItm"
+SEARCH_TOGGLE_CSS_ALT_HELP = "a.sapUshellShellHeadItm[data-help-id='shellHeader-search']"
+SEARCH_TOGGLE_CSS_ALT_ARIA = "a.sapUshellShellHeadItm[role='button'][aria-label*='Search']"
+
+# The input that appears after opening search (robust id pattern)
+SEARCH_INPUT_INNER_CSS = "input[id*='searchFieldInShell'][id$='-inner']"
+
+# Suggestion table + target row
+SUGGEST_TABLE_XPATH = "//table[contains(@id,'searchFieldInShell-input-popup-table-listUl')]"
+# Prefer exact text; fall back to contains if localized slightly
+APP_ROW_BY_TEXT_XPATH = (
+    SUGGEST_TABLE_XPATH +
+    "//span[normalize-space()='Currency Exchange Rates']/ancestor::*[self::tr or self::li][1]"
+)
+APP_ROW_BY_TEXT_ALT_XPATH = (
+    SUGGEST_TABLE_XPATH +
+    "//span[contains(normalize-space(),'Currency Exchange Rate')]/ancestor::*[self::tr or self::li][1]"
+)
+
+
+# Shell\Search\__init__.py
+
+
+
+## .txt / .csv / .json files (names only)
+
+snapshot.txt
+Login\snapshot.txt
